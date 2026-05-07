@@ -10,6 +10,8 @@ import yaml
 
 from .config import get_defaults, get_neuron_config
 
+CONDA_BIN = "/apps/applications/Miniconda/25.11.1/bin/conda"
+
 
 def _ssh_cmd(cfg: dict) -> list[str]:
     """Build base SSH command using ControlMaster."""
@@ -26,6 +28,11 @@ def _run_remote(cfg: dict, command: str) -> subprocess.CompletedProcess:
     """Execute a command on Neuron via SSH."""
     cmd = _ssh_cmd(cfg) + [command]
     return subprocess.run(cmd, capture_output=True, text=True)
+
+
+def _get_conda_path(defaults: dict) -> str:
+    """Get conda binary path from config."""
+    return defaults.get("environment", {}).get("conda_path", CONDA_BIN)
 
 
 @click.group()
@@ -51,12 +58,13 @@ def setup(from_file: str, name: str) -> None:
         click.echo(f"Error: {from_file} not found.")
         sys.exit(1)
 
-    # Upload environment.yml to Neuron
     ssh = cfg["ssh"]
     user = ssh["user"]
     host = ssh["login_host"]
     remote_tmp = f"/scratch/{user}/.neuron-tools/environment.yml"
+    conda = _get_conda_path(defaults)
 
+    # Upload environment.yml to Neuron
     click.echo("Uploading environment file...")
     _run_remote(cfg, f"mkdir -p /scratch/{user}/.neuron-tools")
     ssh_opt = f"ssh -o ControlPath={ssh['control_path']} -p {ssh['port']}"
@@ -66,26 +74,22 @@ def setup(from_file: str, name: str) -> None:
         click.echo(f"Error uploading file: {result.stderr}", err=True)
         sys.exit(1)
 
-    # Build module load chain
-    modules = defaults.get("environment", {}).get("default_modules", [])
-    module_cmds = "module purge && " + " && ".join(f"module load {m}" for m in modules) if modules else ""
-
-    # Parse env name from local YAML to avoid fragile shell parsing
+    # Parse env name from local YAML
     with open(local_file) as _f:
         env_name_from_yaml = yaml.safe_load(_f).get("name", "")
 
     effective_name = name or env_name_from_yaml
     name_flag = f"--name {shlex.quote(effective_name)}" if effective_name else ""
-    remote_cmd = f"""
-{module_cmds}
-if conda env list | grep -q {shlex.quote(effective_name)}; then
-    echo "Updating existing environment..."
-    conda env update {name_flag} --file {remote_tmp} --prune
-else
-    echo "Creating new environment..."
-    conda env create {name_flag} --file {remote_tmp}
-fi
-"""
+
+    remote_cmd = (
+        f"if {conda} env list | grep -q {shlex.quote(effective_name)}; then "
+        f"echo 'Updating existing environment...'; "
+        f"{conda} env update {name_flag} --file {remote_tmp} --prune; "
+        f"else "
+        f"echo 'Creating new environment...'; "
+        f"{conda} env create {name_flag} --file {remote_tmp}; "
+        f"fi"
+    )
 
     click.echo("Setting up Conda environment on Neuron...")
     result = _run_remote(cfg, remote_cmd)
@@ -99,17 +103,34 @@ fi
 @cli.command()
 @click.argument("env_name")
 def activate(env_name: str) -> None:
-    """Print the activation commands for a Neuron environment."""
+    """Print the activation commands for a Neuron environment.
+
+    For pre-built environments (pytorch, tensorflow), use module load.
+    For user environments, use conda run.
+    """
     defaults = get_defaults()
     modules = defaults.get("environment", {}).get("default_modules", [])
 
-    lines = ["module purge"]
-    lines.extend(f"module load {m}" for m in modules)
-    lines.append(f"source activate {env_name}")
+    # Check if env_name matches a known conda module
+    module_envs = {
+        "pytorch": "conda/pytorch_2.9.1_cuda12",
+        "pytorch_cuda12": "conda/pytorch_2.9.1_cuda12",
+        "pytorch_cuda13": "conda/pytorch_2.9.1_cuda13",
+        "tensorflow": "conda/tensorflow_2.20.0",
+    }
 
-    click.echo("# Run the following on Neuron (or add to your SLURM script):")
-    for line in lines:
-        click.echo(line)
+    if env_name in module_envs:
+        click.echo("# Pre-built environment (use in SLURM scripts):")
+        click.echo(f"module load {module_envs[env_name]}")
+    else:
+        click.echo("# User conda environment (use in SLURM scripts):")
+        for m in modules:
+            click.echo(f"module load {m}")
+        click.echo(f"# Then run commands with:")
+        click.echo(f"{CONDA_BIN} run -n {env_name} python your_script.py")
+        click.echo()
+        click.echo("# Or set PATH directly:")
+        click.echo(f"export PATH=$HOME/.conda/envs/{env_name}/bin:$PATH")
 
 
 @cli.command()
@@ -118,12 +139,14 @@ def activate(env_name: str) -> None:
 def export(env_name: str, output: str) -> None:
     """Export a Conda environment from Neuron to a local YAML file."""
     cfg = get_neuron_config()
+    defaults = get_defaults()
 
     if not cfg["ssh"]["user"]:
         click.echo("Error: NEURON_USER not set.")
         sys.exit(1)
 
-    remote_cmd = f"conda env export --name {shlex.quote(env_name)} --no-builds"
+    conda = _get_conda_path(defaults)
+    remote_cmd = f"{conda} env export --name {shlex.quote(env_name)} --no-builds"
     result = _run_remote(cfg, remote_cmd)
 
     if result.returncode != 0:
@@ -138,13 +161,49 @@ def export(env_name: str, output: str) -> None:
 def list_envs() -> None:
     """List Conda environments on Neuron."""
     cfg = get_neuron_config()
+    defaults = get_defaults()
 
     if not cfg["ssh"]["user"]:
         click.echo("Error: NEURON_USER not set.")
         sys.exit(1)
 
-    result = _run_remote(cfg, "conda env list")
+    conda = _get_conda_path(defaults)
+    result = _run_remote(cfg, f"{conda} env list")
+
     if result.returncode == 0:
         click.echo(result.stdout)
     else:
         click.echo(f"Error: {result.stderr}", err=True)
+
+    # Also show available module-based environments
+    click.echo("\nPre-built environments (use via module load):")
+    mod_result = _run_remote(cfg, "module avail conda 2>&1")
+    if mod_result.stdout:
+        click.echo(mod_result.stdout)
+    elif mod_result.stderr:
+        # module avail outputs to stderr
+        for line in mod_result.stderr.split("\n"):
+            if "conda/" in line or "---" in line:
+                click.echo(f"  {line.strip()}")
+
+
+@cli.command("modules")
+def list_modules() -> None:
+    """Show available pre-built conda module environments on Neuron."""
+    cfg = get_neuron_config()
+
+    if not cfg["ssh"]["user"]:
+        click.echo("Error: NEURON_USER not set.")
+        sys.exit(1)
+
+    click.echo("Available pre-built environments (module load):\n")
+    result = _run_remote(cfg, "module avail conda 2>&1")
+    output = result.stdout or result.stderr
+    for line in output.split("\n"):
+        if line.strip():
+            click.echo(f"  {line.strip()}")
+
+    click.echo("\nUsage in experiment.yaml:")
+    click.echo("  environment:")
+    click.echo("    modules:")
+    click.echo("      - conda/pytorch_2.9.1_cuda12")

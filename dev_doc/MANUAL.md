@@ -539,19 +539,29 @@ neuron-container run /scratch/$USER/.neuron-tools/genesis-sim.sif \
 
 **통과 기준**: Genesis import 성공 (Conda 또는 Singularity 내)
 
-### 5.3 테스트 체크리스트
+### 5.3 테스트 체크리스트 (2026-05-07 검증 완료)
 
 ```
-[ ] Test 1: SSH 연결 (connect/status/disconnect)
-[ ] Test 2: 파일 동기화 (push/pull/watch)
-[ ] Test 3: 환경 설정 (setup/list/activate)
-[ ] Test 4: SLURM 제출 (launch/status/logs/cancel)
-[ ] Test 5: 결과 수집 (results/best/compare)
-[ ] Test 6: 파티션/보존/알림
-[ ] Test 7: 시뮬레이터 (선택)
+[x] Test 1: SSH 연결 (connect/status/disconnect) - glogin01, OTP 1회
+[x] Test 2: 파일 동기화 (push/pull) - rsync + ControlPath
+[ ] Test 3: 환경 설정 (setup/list/activate) - Neuron에서 conda 직접 불가, container 사용 권장
+[x] Test 4: SLURM 제출 (launch/status/logs/cancel) - Job 717737,717738 성공
+[x] Test 5: 결과 수집 (results/best/compare) - 3개 실험 결과 조회 성공
+[x] Test 6: 파티션/보존 - H200 추천, 삭제 위험 파일 감지
+[ ] Test 7: 시뮬레이터 컨테이너 빌드 (선택)
 ```
 
-### 5.4 예상 이슈 및 대응
+### 5.4 실서버 테스트에서 발견된 주의사항
+
+| 이슈 | 원인 | 해결 상태 |
+|------|------|----------|
+| Neuron에서 conda 직접 사용 불가 | base 환경에 conda init 안 됨 | 템플릿에서 `base` 환경일 때 `source activate` 스킵하도록 수정 완료 |
+| `module purge` 시 작업 즉시 취소 | SLURM 환경 변수까지 제거됨 | 템플릿에서 `module purge` 제거 완료 |
+| scp가 ControlMaster 미지원 | scp는 socket 기반 멀티플렉싱 불가 | scp → rsync 전면 교체 완료 |
+| `$USER`가 SLURM 스크립트에서 미해석 | KISTI 환경 특이사항 | `{{ user }}` Jinja2 변수로 교체 완료 |
+| sbatch는 scratch에서만 실행 가능 | KISTI 정책 | `_run_remote`에 `cd /scratch/$USER &&` 래핑 완료 |
+
+### 5.5 일반 예상 이슈 및 대응
 
 | 예상 이슈 | 원인 | 대응 방법 |
 |-----------|------|----------|
@@ -559,7 +569,6 @@ neuron-container run /scratch/$USER/.neuron-tools/genesis-sim.sif \
 | rsync 연결 거부 | SSH 소켓 없음 | `neuron-status` 확인 → `neuron-connect` |
 | sbatch 실패 | 파티션 풀, 옵션 오류 | `neuron-partition`으로 대안 확인, `--dry-run`으로 스크립트 검토 |
 | module load 실패 | 모듈명 변경 | `ssh neuron 'module avail cuda'`로 확인, `configs/defaults.yaml` 수정 |
-| conda create 실패 | 디스크 쿼터 초과 | `ssh neuron 'du -sh /scratch/$USER'` 확인 |
 | /scratch 파일 삭제 | 15일 미접근 | `neuron-keepalive setup-cron` 즉시 설정 |
 | 계산 노드 네트워크 차단 | pip/wandb 외부 접속 불가 | Singularity 컨테이너 사용, `WANDB_MODE=offline` |
 
