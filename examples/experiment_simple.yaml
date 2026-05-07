@@ -1,0 +1,32 @@
+# Simple training experiment (no simulator)
+# Usage: neuron-exp launch examples/experiment_simple.yaml
+
+project: my_model
+description: "Model architecture search"
+
+slurm:
+  partition: amd_a100nv_8
+  nodes: 1
+  gpus: 2
+  cpus_per_gpu: 8
+  time: "12:00:00"
+  comment: pytorch
+
+environment:
+  type: conda
+  name: train_env
+  modules:
+    - cuda/12.4.1
+
+base_params:
+  dataset: /scratch/$USER/data/my_dataset
+  epochs: 50
+  batch_size: 128
+  optimizer: adamw
+  seed: 42
+
+sweep:
+  method: grid
+  parameters:
+    learning_rate: [1e-4, 3e-4, 1e-3]
+    dropout: [0.1, 0.3]

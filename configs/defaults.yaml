@@ -1,0 +1,37 @@
+# SLURM 기본 옵션
+slurm:
+  partition: amd_a100nv_8
+  nodes: 1
+  gpus: 2
+  cpus_per_gpu: 8
+  time: "24:00:00"
+  comment: pytorch
+
+# 동기화 제외 패턴
+sync:
+  exclude:
+    - ".git/"
+    - "__pycache__/"
+    - "*.pyc"
+    - "*.pyo"
+    - ".DS_Store"
+    - "wandb/"
+    - "*.sif"
+    - "*.pt"
+    - "*.pth"
+    - "outputs/"
+    - "logs/"
+    - ".vscode/"
+    - ".idea/"
+    - "*.egg-info/"
+  pull_include:
+    - "experiments/*/config.yaml"
+    - "experiments/*/eval_results.json"
+    - "experiments/*/train_log.json"
+    - "experiments/*/checkpoints/best_model.pth"
+    - "experiments/summary.csv"
+
+# 환경 기본 모듈
+environment:
+  default_modules:
+    - cuda/12.4.1

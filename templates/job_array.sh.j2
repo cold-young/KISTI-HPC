@@ -1,0 +1,38 @@
+#!/bin/bash
+#SBATCH -J {{ project }}_sweep
+#SBATCH -p {{ partition }}
+#SBATCH --nodes={{ nodes }}
+#SBATCH --ntasks-per-node=1
+#SBATCH --gres=gpu:{{ gpus }}
+#SBATCH --cpus-per-gpu={{ cpus_per_gpu }}
+#SBATCH --time={{ time }}
+#SBATCH --comment {{ comment }}
+#SBATCH --array=0-{{ array_max }}{% if array_simultaneous %}%{{ array_simultaneous }}{% endif %}
+
+#SBATCH -o /scratch/$USER/logs/%x_%A_%a.out
+#SBATCH -e /scratch/$USER/logs/%x_%A_%a.err
+
+# === Environment Setup ===
+module purge
+{% for mod in modules %}
+module load {{ mod }}
+{% endfor %}
+source activate {{ conda_env }}
+
+# === Working Directory ===
+cd /scratch/$USER/projects/{{ project }}
+
+# === Select Config by Array Index ===
+CONFIG_DIR="{{ config_dir }}"
+CONFIG_FILE="${CONFIG_DIR}/config_$(printf '%03d' ${SLURM_ARRAY_TASK_ID}).yaml"
+
+export EXPERIMENT_ID="{{ project }}_${SLURM_ARRAY_TASK_ID}"
+export CONFIG_PATH="${CONFIG_FILE}"
+export WANDB_MODE=offline
+
+python {{ script }} --config ${CONFIG_FILE} {{ args }}
+
+# === Record Completion ===
+EXIT_CODE=$?
+echo "EXPERIMENT_DONE: $EXPERIMENT_ID exit_code=${EXIT_CODE}" >> /scratch/$USER/logs/completed.log
+exit ${EXIT_CODE}

@@ -1,0 +1,38 @@
+Bootstrap: docker
+From: nvcr.io/nvidia/pytorch:23.10-py3
+
+%post
+    apt-get update && apt-get install -y --no-install-recommends \
+        libgl1-mesa-glx \
+        libglib2.0-0 \
+        && rm -rf /var/lib/apt/lists/*
+
+    pip install --no-cache-dir \
+        wandb \
+        hydra-core \
+        omegaconf \
+        rich \
+        click
+
+    # NOTE: Isaac Gym Preview 4 must be manually downloaded from NVIDIA
+    # and placed in the build context before building this container.
+    # Steps:
+    #   1. Download IsaacGym_Preview_4_Package.tar.gz from NVIDIA
+    #   2. Extract and run: pip install isaacgym/python/
+    # Uncomment below after placing the package:
+    # COPY isaacgym /opt/isaacgym
+    # pip install -e /opt/isaacgym/python/
+
+%environment
+    export WANDB_MODE=offline
+    export PYTHONUNBUFFERED=1
+    # Isaac Gym env vars
+    export LD_LIBRARY_PATH=/opt/isaacgym/lib:${LD_LIBRARY_PATH}
+
+%runscript
+    python "$@"
+
+%labels
+    Author neuron-cli
+    Description Isaac Gym Preview 4 (DEPRECATED) for KISTI Neuron HPC
+    Warning "Isaac Gym Preview is deprecated. Consider Genesis for new projects."

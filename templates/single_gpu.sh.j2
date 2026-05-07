@@ -1,0 +1,33 @@
+#!/bin/bash
+#SBATCH -J {{ project }}_{{ exp_id }}
+#SBATCH -p {{ partition }}
+#SBATCH --nodes={{ nodes }}
+#SBATCH --ntasks-per-node=1
+#SBATCH --gres=gpu:{{ gpus }}
+#SBATCH --cpus-per-gpu={{ cpus_per_gpu }}
+#SBATCH --time={{ time }}
+#SBATCH --comment {{ comment }}
+#SBATCH -o /scratch/$USER/logs/%x_%j.out
+#SBATCH -e /scratch/$USER/logs/%x_%j.err
+
+# === Environment Setup ===
+module purge
+{% for mod in modules %}
+module load {{ mod }}
+{% endfor %}
+source activate {{ conda_env }}
+
+# === Working Directory ===
+cd /scratch/$USER/projects/{{ project }}
+
+# === Experiment ===
+export EXPERIMENT_ID="{{ exp_id }}"
+export CONFIG_PATH="{{ config_path }}"
+export WANDB_MODE=offline
+
+python {{ script }} {{ args }}
+
+# === Record Completion ===
+EXIT_CODE=$?
+echo "EXPERIMENT_DONE: $EXPERIMENT_ID exit_code=${EXIT_CODE}" >> /scratch/$USER/logs/completed.log
+exit ${EXIT_CODE}

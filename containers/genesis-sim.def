@@ -1,0 +1,24 @@
+Bootstrap: docker
+From: nvcr.io/nvidia/pytorch:24.01-py3
+
+%post
+    pip install --no-cache-dir \
+        genesis-world \
+        wandb \
+        hydra-core \
+        omegaconf \
+        timm \
+        einops \
+        rich \
+        click
+
+%environment
+    export WANDB_MODE=offline
+    export PYTHONUNBUFFERED=1
+
+%runscript
+    python "$@"
+
+%labels
+    Author neuron-cli
+    Description Genesis simulator image for KISTI Neuron HPC

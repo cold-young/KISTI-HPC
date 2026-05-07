@@ -1,0 +1,50 @@
+# Genesis simulation -> training -> evaluation pipeline
+# Usage: neuron-exp launch examples/experiment_genesis.yaml
+
+project: manipulation_genesis
+description: "Vision-based manipulation with Genesis simulator"
+
+slurm:
+  partition: amd_a100nv_8
+  nodes: 1
+  gpus: 2
+  cpus_per_gpu: 8
+  time: "24:00:00"
+  comment: genesis
+
+environment:
+  type: singularity
+  name: genesis_env
+  container: /scratch/$USER/.neuron-tools/genesis-sim.sif
+  modules:
+    - cuda/12.4.1
+
+base_params:
+  dataset: /scratch/$USER/data/manipulation_genesis
+  epochs: 100
+  batch_size: 64
+  optimizer: adamw
+  learning_rate: 3e-4
+  seed: 42
+
+sweep:
+  method: grid
+  parameters:
+    learning_rate: [1e-4, 3e-4, 1e-3]
+    model_arch: [resnet50, vit_base]
+    hidden_dim: [256, 512]
+
+pipeline:
+  - name: generate_data
+    script: genesis_datagen.py
+    args: "--env manipulation --num_episodes 10000 --output /scratch/$USER/data/manipulation_genesis"
+
+  - name: train
+    script: train.py
+    depends_on: generate_data
+    args: "--config {config_path}"
+
+  - name: evaluate_sim
+    script: genesis_eval.py
+    depends_on: train
+    args: "--checkpoint checkpoints/best_model.pth --env manipulation"
