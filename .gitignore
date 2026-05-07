@@ -15,6 +15,12 @@
 **/*.usdz
 /results
 
+.db
+.db-shm
+.db-wal
+**/.vscode/
+
+
 # Python
 .DS_Store
 **/*.egg-info/
