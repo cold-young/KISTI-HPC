@@ -13,6 +13,7 @@
 **/*.usda
 **/*.usdc
 **/*.usdz
+/results
 
 # Python
 .DS_Store

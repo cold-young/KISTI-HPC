@@ -7,6 +7,7 @@ import json
 import random
 import subprocess
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -334,6 +335,116 @@ def logs(job_id: str) -> None:
         subprocess.run(cmd)
     except KeyboardInterrupt:
         click.echo("\nStopped streaming.")
+
+
+@cli.command()
+@click.argument("project")
+@click.option("--auto-pull", default=None, type=click.Path(), help="Local dir to auto-download results when jobs finish")
+@click.option("--interval", "-i", default=30, help="Poll interval in seconds (default: 30)")
+@click.option("--jobs", "-j", default=None, help="Comma-separated job IDs to watch (default: all user jobs)")
+def watch(project: str, auto_pull: str | None, interval: int, jobs: str | None) -> None:
+    """Watch running jobs and auto-pull results when they complete."""
+    cfg = get_neuron_config()
+
+    if not cfg["ssh"]["user"]:
+        click.echo("Error: NEURON_USER not set.")
+        sys.exit(1)
+
+    user = cfg["ssh"]["user"]
+    watch_ids = set(jobs.split(",")) if jobs else None
+    completed_ids: set[str] = set()
+
+    click.echo(f"Watching jobs for project '{project}'...")
+    if auto_pull:
+        click.echo(f"Auto-pull to: {auto_pull}")
+    click.echo(f"Poll interval: {interval}s (Ctrl+C to stop)\n")
+
+    try:
+        while True:
+            # Get current job states via sacct
+            if watch_ids:
+                job_filter = ",".join(watch_ids - completed_ids)
+                if not job_filter:
+                    click.echo("All watched jobs completed.")
+                    break
+                result = _run_remote(cfg, f"sacct -j {job_filter} --format=JobID%15,JobName%30,State%12,ExitCode,Elapsed --noheader --parsable2")
+            else:
+                result = _run_remote(cfg, f"squeue -u {user} -o '%i|%j|%T|%M' --noheader")
+
+            if result.returncode != 0:
+                time.sleep(interval)
+                continue
+
+            lines = [l for l in result.stdout.strip().split("\n") if l.strip()]
+
+            if watch_ids:
+                # sacct mode: detect newly completed jobs
+                for line in lines:
+                    parts = line.split("|")
+                    if len(parts) < 4:
+                        continue
+                    job_id = parts[0].strip()
+                    if "." in job_id:  # skip sub-steps like 717773.batch
+                        continue
+                    state = parts[2].strip()
+                    if state in ("COMPLETED", "FAILED", "CANCELLED", "TIMEOUT") and job_id not in completed_ids:
+                        exit_code = parts[3].strip()
+                        elapsed = parts[4].strip() if len(parts) > 4 else ""
+                        ts = time.strftime("%H:%M:%S")
+                        icon = "OK" if state == "COMPLETED" else "FAIL"
+                        click.echo(f"  [{ts}] [{icon}] Job {job_id} {state} (exit: {exit_code}, time: {elapsed})")
+                        completed_ids.add(job_id)
+
+                        if auto_pull and state == "COMPLETED":
+                            _auto_pull_results(cfg, project, auto_pull)
+
+                # Check if all done
+                remaining = watch_ids - completed_ids
+                if not remaining:
+                    click.echo("\nAll watched jobs completed.")
+                    break
+            else:
+                # squeue mode: show running jobs, exit when none left
+                running = [l for l in lines if project in l]
+                if not running:
+                    click.echo("No running jobs found for this project.")
+                    if auto_pull:
+                        _auto_pull_results(cfg, project, auto_pull)
+                    break
+                ts = time.strftime("%H:%M:%S")
+                click.echo(f"  [{ts}] {len(running)} job(s) running...")
+
+            time.sleep(interval)
+
+    except KeyboardInterrupt:
+        click.echo("\nStopped watching.")
+        if auto_pull:
+            click.echo("Pulling latest results...")
+            _auto_pull_results(cfg, project, auto_pull)
+
+
+def _auto_pull_results(cfg: dict, project: str, local_dir: str) -> None:
+    """Pull experiment results from Neuron to local directory."""
+    from pathlib import Path
+    ssh = cfg["ssh"]
+    user = ssh["user"]
+    remote = f"{user}@{ssh['login_host']}:/scratch/{user}/projects/{project}/experiments/"
+    local = Path(local_dir).resolve()
+    local.mkdir(parents=True, exist_ok=True)
+
+    ssh_opt = f"ssh -o ControlPath={ssh['control_path']} -p {ssh['port']}"
+    cmd = [
+        "rsync", "-avz", "--progress",
+        "-e", ssh_opt,
+        remote,
+        f"{local}/",
+    ]
+    click.echo(f"  Pulling results → {local}/")
+    result = subprocess.run(cmd)
+    if result.returncode == 0:
+        click.echo("  Pull complete.")
+    else:
+        click.echo("  Pull failed.", err=True)
 
 
 @cli.command()

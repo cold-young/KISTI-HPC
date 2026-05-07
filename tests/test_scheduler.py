@@ -14,7 +14,7 @@ def test_single_gpu_script_contains_required_fields():
     assert "#SBATCH -J test_project_exp_001" in script
     assert "#SBATCH -p amd_a100nv_8" in script
     assert "#SBATCH --comment pytorch" in script
-    assert "source activate test_env" in script
+    assert "PATH=$HOME/.conda/envs/test_env/bin" in script
     assert "python train.py --lr 1e-4" in script
     assert "module load cuda/12.4.1" in script
 

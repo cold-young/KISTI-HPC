@@ -1,0 +1,69 @@
+Bootstrap: docker
+From: nvcr.io/nvidia/pytorch:23.10-py3
+
+%labels
+    Author neuron-cli
+    Description SimToolReal (Isaac Gym Preview 4) for KISTI Neuron HPC
+
+%post
+    # System deps
+    apt-get update && apt-get install -y --no-install-recommends \
+        git wget unzip libgl1-mesa-glx libglib2.0-0 libxrender1 \
+        && rm -rf /var/lib/apt/lists/*
+
+    # Use Python 3.8 via deadsnakes for Isaac Gym compatibility
+    apt-get update && apt-get install -y software-properties-common \
+        && add-apt-repository ppa:deadsnakes/ppa -y \
+        && apt-get update \
+        && apt-get install -y python3.8 python3.8-venv python3.8-dev python3.8-distutils \
+        && rm -rf /var/lib/apt/lists/*
+
+    # Setup Python 3.8 venv
+    python3.8 -m venv /opt/simtoolreal_env
+    . /opt/simtoolreal_env/bin/activate
+
+    # Upgrade pip
+    pip install --no-cache-dir --upgrade pip setuptools wheel
+
+    # Install PyTorch (CUDA 11.8 compatible with Isaac Gym)
+    pip install --no-cache-dir torch==2.1.0 torchvision==0.16.0 --index-url https://download.pytorch.org/whl/cu118
+
+    # Download and install Isaac Gym Preview 4
+    cd /opt
+    wget -q https://developer.nvidia.com/isaac-gym-preview-4 -O IsaacGym_Preview_4_Package.tar.gz || true
+    # NOTE: If wget fails (auth required), Isaac Gym must be manually downloaded
+    # and placed at /scratch/$USER/IsaacGym_Preview_4_Package.tar.gz before build
+    if [ -f IsaacGym_Preview_4_Package.tar.gz ]; then
+        tar -xzf IsaacGym_Preview_4_Package.tar.gz
+        cd isaacgym/python
+        pip install --no-cache-dir -e .
+        cd /opt
+        rm -f IsaacGym_Preview_4_Package.tar.gz
+    fi
+
+    # Install simtoolreal deps
+    pip install --no-cache-dir \
+        gym==0.23.1 \
+        omegaconf \
+        hydra-core>=1.2 \
+        rl-games>=1.6.0 \
+        termcolor \
+        jinja2 \
+        urdfpy==0.0.22 \
+        pysdf==0.1.9 \
+        warp-lang==0.10.1 \
+        trimesh==3.23.5 \
+        wandb \
+        rich
+
+%environment
+    export PATH=/opt/simtoolreal_env/bin:$PATH
+    export WANDB_MODE=offline
+    export PYTHONUNBUFFERED=1
+    # Isaac Gym
+    export LD_LIBRARY_PATH=/opt/simtoolreal_env/lib/python3.8/site-packages/isaacgym/_bindings/linux-x86_64:${LD_LIBRARY_PATH}
+    export VK_ICD_FILENAMES=""
+
+%runscript
+    . /opt/simtoolreal_env/bin/activate
+    exec python "$@"
