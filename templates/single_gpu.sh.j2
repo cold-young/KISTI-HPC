@@ -7,18 +7,19 @@
 #SBATCH --cpus-per-gpu={{ cpus_per_gpu }}
 #SBATCH --time={{ time }}
 #SBATCH --comment {{ comment }}
-#SBATCH -o /scratch/$USER/logs/%x_%j.out
-#SBATCH -e /scratch/$USER/logs/%x_%j.err
+#SBATCH -o /scratch/{{ user }}/logs/%x_%j.out
+#SBATCH -e /scratch/{{ user }}/logs/%x_%j.err
 
 # === Environment Setup ===
-module purge
 {% for mod in modules %}
 module load {{ mod }}
 {% endfor %}
-source activate {{ conda_env }}
+{% if conda_env and conda_env != 'base' %}
+source activate {{ conda_env }} 2>/dev/null || conda activate {{ conda_env }} 2>/dev/null || true
+{% endif %}
 
 # === Working Directory ===
-cd /scratch/$USER/projects/{{ project }}
+cd /scratch/{{ user }}/projects/{{ project }}
 
 # === Experiment ===
 export EXPERIMENT_ID="{{ exp_id }}"
@@ -29,5 +30,5 @@ python {{ script }} {{ args }}
 
 # === Record Completion ===
 EXIT_CODE=$?
-echo "EXPERIMENT_DONE: $EXPERIMENT_ID exit_code=${EXIT_CODE}" >> /scratch/$USER/logs/completed.log
+echo "EXPERIMENT_DONE: $EXPERIMENT_ID exit_code=${EXIT_CODE}" >> /scratch/{{ user }}/logs/completed.log
 exit ${EXIT_CODE}

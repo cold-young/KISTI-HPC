@@ -41,9 +41,17 @@ def _detect_project_name(local_path: Path) -> str:
     return local_path.resolve().name
 
 
-def _run_rsync(args: list[str], dry_run: bool = False) -> int:
+def _build_ssh_option(cfg: dict) -> str:
+    """Build SSH command string for rsync -e option."""
+    ssh = cfg["ssh"]
+    return f"ssh -o ControlPath={ssh['control_path']} -p {ssh['port']}"
+
+
+def _run_rsync(args: list[str], cfg: dict | None = None, dry_run: bool = False) -> int:
     """Execute rsync with given arguments."""
     cmd = ["rsync", "-avz", "--progress"]
+    if cfg:
+        cmd.extend(["-e", _build_ssh_option(cfg)])
     if dry_run:
         cmd.append("--dry-run")
     cmd.extend(args)
@@ -81,7 +89,7 @@ def push(local_path: str, project: str | None, dry_run: bool, delete: bool) -> N
         args.append("--delete")
     args.extend([f"{local}/", remote])
 
-    rc = _run_rsync(args, dry_run=dry_run)
+    rc = _run_rsync(args, cfg=cfg, dry_run=dry_run)
     if rc == 0:
         click.echo("Push complete.")
     else:
@@ -116,7 +124,7 @@ def pull(local_path: str, project: str | None, all_files: bool, dry_run: bool) -
         args.extend(["--exclude", "*"])
     args.extend([remote, f"{local}/"])
 
-    rc = _run_rsync(args, dry_run=dry_run)
+    rc = _run_rsync(args, cfg=cfg, dry_run=dry_run)
     if rc == 0:
         click.echo("Pull complete.")
     else:
@@ -171,7 +179,8 @@ def watch(local_path: str, project: str | None, interval: float) -> None:
                 self._pending = False
                 self._last_sync = now
                 args = exclude_args + [f"{local}/", remote]
-                cmd = ["rsync", "-avz", "--quiet"] + args
+                ssh_opt = _build_ssh_option(cfg)
+                cmd = ["rsync", "-avz", "--quiet", "-e", ssh_opt] + args
                 result = subprocess.run(cmd, capture_output=True, text=True)
                 ts = time.strftime("%H:%M:%S")
                 if result.returncode == 0:
@@ -215,7 +224,7 @@ def push_data(local_data_path: str, via: str, dry_run: bool) -> None:
     click.echo(f"Pushing data {local}/ -> {remote} (via {via} node)")
 
     args = [f"{local}/", remote]
-    rc = _run_rsync(args, dry_run=dry_run)
+    rc = _run_rsync(args, cfg=cfg, dry_run=dry_run)
     if rc == 0:
         click.echo("Data push complete.")
     else:

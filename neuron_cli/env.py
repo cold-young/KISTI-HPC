@@ -59,8 +59,9 @@ def setup(from_file: str, name: str) -> None:
 
     click.echo("Uploading environment file...")
     _run_remote(cfg, f"mkdir -p /scratch/{user}/.neuron-tools")
-    scp_cmd = ["scp", "-P", str(ssh["port"]), str(local_file), f"{user}@{host}:{remote_tmp}"]
-    result = subprocess.run(scp_cmd, capture_output=True, text=True)
+    ssh_opt = f"ssh -o ControlPath={ssh['control_path']} -p {ssh['port']}"
+    rsync_cmd = ["rsync", "-az", "-e", ssh_opt, str(local_file), f"{user}@{host}:{remote_tmp}"]
+    result = subprocess.run(rsync_cmd, capture_output=True, text=True)
     if result.returncode != 0:
         click.echo(f"Error uploading file: {result.stderr}", err=True)
         sys.exit(1)

@@ -33,7 +33,10 @@ def _ssh_cmd(cfg: dict) -> list[str]:
 
 
 def _run_remote(cfg: dict, command: str) -> subprocess.CompletedProcess:
-    cmd = _ssh_cmd(cfg) + [command]
+    # Ensure commands run from scratch directory (KISTI sbatch requirement)
+    user = cfg["ssh"]["user"]
+    wrapped = f"cd /scratch/{user} && {command}"
+    cmd = _ssh_cmd(cfg) + [wrapped]
     return subprocess.run(cmd, capture_output=True, text=True)
 
 
@@ -262,9 +265,15 @@ def launch(experiment_file: str, dry_run: bool, max_jobs: int | None, partition:
 
 
 def _upload_file(cfg: dict, local_path: str, remote_path: str) -> bool:
-    """Upload a file to Neuron via scp. Returns True on success."""
+    """Upload a file to Neuron via rsync. Returns True on success."""
     ssh = cfg["ssh"]
-    cmd = ["scp", "-P", str(ssh["port"]), local_path, f"{ssh['user']}@{ssh['login_host']}:{remote_path}"]
+    ssh_cmd = f"ssh -o ControlPath={ssh['control_path']} -p {ssh['port']}"
+    cmd = [
+        "rsync", "-az",
+        "-e", ssh_cmd,
+        local_path,
+        f"{ssh['user']}@{ssh['login_host']}:{remote_path}",
+    ]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         click.echo(f"Upload failed ({local_path}): {result.stderr}", err=True)

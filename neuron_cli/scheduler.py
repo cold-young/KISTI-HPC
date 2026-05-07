@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader
@@ -14,6 +15,11 @@ def get_template_dir() -> Path:
 
 def render_slurm_script(template_name: str, **kwargs) -> str:
     """Render a SLURM script from a Jinja2 template."""
+    # Inject user if not provided
+    if "user" not in kwargs:
+        from .config import get_neuron_config
+        cfg = get_neuron_config()
+        kwargs["user"] = cfg["ssh"]["user"]
     env = Environment(
         loader=FileSystemLoader(str(get_template_dir())),
         keep_trailing_newline=True,

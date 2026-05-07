@@ -1,6 +1,6 @@
 # KISTI Neuron 자동화 개발 현황
 
-> 마지막 업데이트: 2026-05-07 (모니터링 에이전트 - 69차 스캔)
+> 마지막 업데이트: 2026-05-07 (모니터링 에이전트 - 132차 스캔, Phase 5 실서버 테스트 진행 중)
 
 ---
 
@@ -86,14 +86,12 @@
 
 23. ~~**[BUG] `pyproject.toml:33` - `neuron-partition` 미구현 모듈 참조**~~ -> **해결됨 (35차)**: `partition_selector.py` 구현 완료
 
-24. **[LOW] `partition_selector.py:170` - neuron-exp launch에 --partition 옵션 미존재**
-    - 안내 메시지에서 `neuron-exp launch experiment.yaml --partition ...` 제안하지만 experiment.py launch에 해당 옵션 없음
-    - **권장**: experiment.yaml의 slurm.partition 수정을 안내하거나, launch에 --partition 옵션 추가
+24. ~~**[LOW] `partition_selector.py:170` - neuron-exp launch에 --partition 옵션 미존재**~~ -> **해결됨 (122차)**: experiment.py launch에 `--partition`, `--gpus` 옵션 추가
 
 ### 기존 미해결 (경미)
 
-13. **[LOW] `env.py:125` - export/list env_name 미이스케이프**
-14. **[STYLE] `env.py:72` - 함수 내부 import yaml**
+13. ~~**[LOW] `env.py:125` - export/list env_name 미이스케이프**~~ -> **해결됨 (122차)**: `shlex.quote(env_name)` 적용
+14. ~~**[STYLE] `env.py:72` - 함수 내부 import yaml**~~ -> **해결됨 (122차)**: 모듈 상단으로 이동
 
 ---
 
@@ -186,4 +184,11 @@
 | 36~66차 | 변경 없음 (약 31회 연속) | 장기 대기 |
 | 67차 | experiment.py 수정 - _upload_file 에러 체크 추가 (#11 해결) | **Phase 2도 100% 완료!** |
 | 68차 | 변경 없음 | 대기 |
-| 69차 | **simulator.py 신규** (compat/list/check-env/init-pipeline/scaffold), **isaacgym-preview.def 신규**, **examples/ 2개 YAML 신규** | **Phase 4 100% 완료! 전 Phase 구현 완료.** 신규 버그 #25(pyproject.toml neuron-sim 누락) |
+| 69차 | **simulator.py 신규**, isaacgym-preview.def, examples/ 2개 YAML 신규 | **Phase 4 100% 완료!** |
+| 70~75차 | 변경 없음 | 대기 |
+| 76차 | **dev_doc/MANUAL.md 신규** - 611줄 완전한 사용 매뉴얼 + Phase 5 서버 테스트 계획 | 전체 프로젝트 문서화 완료. 코드+문서 모두 완성 |
+| 77~121차 | 변경 없음 (약 45회 연속) | 장기 대기 |
+| 122차 | **Phase 5 실서버 테스트 시작!** neuron.yaml(실제 ID), sync.py(SSH ControlPath), env.py(shlex+yaml), experiment.py(cd /scratch + --partition/--gpus + ControlPath) | 실서버 대응 수정 4건. #13,#14,#24 해결 |
+| 123~130차 | 변경 없음 | 실서버 테스트 진행 중 |
+| 131차 | env.py: scp→rsync, experiment.py: _upload_file scp→rsync | **실서버 발견: scp ControlMaster 미호환 → rsync 통일** |
+| 132차 | multi_gpu/single_gpu/job_array .j2: conda activate 폴백 추가 (`source activate \|\| conda activate \|\| true` + base 스킵) | **실서버 발견: source activate 실패 대응.** pipeline.sh.j2만 미수정 (불일치) |

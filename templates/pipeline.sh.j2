@@ -10,18 +10,19 @@
 {% if dependency_job_id %}
 #SBATCH --dependency=afterok:{{ dependency_job_id }}
 {% endif %}
-#SBATCH -o /scratch/$USER/logs/%x_%j.out
-#SBATCH -e /scratch/$USER/logs/%x_%j.err
+#SBATCH -o /scratch/{{ user }}/logs/%x_%j.out
+#SBATCH -e /scratch/{{ user }}/logs/%x_%j.err
 
 # === Environment Setup ===
-module purge
 {% for mod in modules %}
 module load {{ mod }}
 {% endfor %}
-source activate {{ conda_env }}
+{% if conda_env and conda_env != 'base' %}
+source activate {{ conda_env }} 2>/dev/null || conda activate {{ conda_env }} 2>/dev/null || true
+{% endif %}
 
 # === Working Directory ===
-cd /scratch/$USER/projects/{{ project }}
+cd /scratch/{{ user }}/projects/{{ project }}
 
 # === Stage: {{ stage_name }} ===
 export EXPERIMENT_ID="{{ exp_id }}"
@@ -32,5 +33,5 @@ export WANDB_MODE=offline
 python {{ script }} {{ args }}
 
 EXIT_CODE=$?
-echo "STAGE_DONE: ${STAGE_NAME} exp=${EXPERIMENT_ID} exit_code=${EXIT_CODE}" >> /scratch/$USER/logs/completed.log
+echo "STAGE_DONE: ${STAGE_NAME} exp=${EXPERIMENT_ID} exit_code=${EXIT_CODE}" >> /scratch/{{ user }}/logs/completed.log
 exit ${EXIT_CODE}

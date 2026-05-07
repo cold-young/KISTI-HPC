@@ -34,12 +34,18 @@ def _fetch_experiment_results(cfg: dict, project: str) -> list[dict]:
     user = cfg["ssh"]["user"]
     exp_dir = f"/scratch/{user}/projects/{project}/experiments"
 
-    # Find and read all result files in a single SSH call
-    cmd = (
-        f"find {exp_dir} \\( -name 'eval_results.json' -o -name 'train_log.json' \\) "
-        f"-exec sh -c 'echo \"__FILE__:$1\"; cat \"$1\"' _ {{}} \\; 2>/dev/null"
-    )
-    result = _run_remote(cfg, cmd)
+    # Step 1: Find all result files
+    find_cmd = f"find {exp_dir} -name 'eval_results.json' 2>/dev/null"
+    find_result = _run_remote(cfg, find_cmd)
+    if find_result.returncode != 0 or not find_result.stdout.strip():
+        return []
+
+    # Step 2: Read all files in one cat call
+    files = [f for f in find_result.stdout.strip().split("\n") if f.strip()]
+    if not files:
+        return []
+    cat_cmd = "; ".join(f"echo; echo __FILE__:{f}; cat {f}" for f in files)
+    result = _run_remote(cfg, cat_cmd)
     if result.returncode != 0 or not result.stdout.strip():
         return []
 
