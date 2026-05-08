@@ -41,6 +41,17 @@ def _run_remote(cfg: dict, command: str) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, text=True)
 
 
+class _StrictFormatDict(dict):
+    """Dict for ``str.format_map`` that raises ``KeyError`` on missing keys.
+
+    Used so manifest-author typos in placeholders surface as a hard error at
+    launch time instead of being passed through verbatim into the sbatch args.
+    """
+
+    def __missing__(self, key):  # pragma: no cover - tiny shim
+        raise KeyError(key)
+
+
 def _generate_sweep_configs(sweep: dict, base_params: dict) -> list[dict]:
     """Generate parameter combinations from sweep config."""
     method = sweep.get("method", "grid")
@@ -117,6 +128,13 @@ def launch(experiment_file: str, dry_run: bool, max_jobs: int | None, partition:
 
     env_cfg = exp.get("environment", {})
     conda_env = env_cfg.get("name", "base")
+    # New: surface environment.type ("conda" | "singularity" | None) and
+    # environment.container (for singularity) to the SLURM template so the
+    # generated job actually runs python inside the requested env. Without
+    # this, the template falls back to the host system python and ImportErrors
+    # immediately. (Tracked as BUG-K1 in results/dev_doc/dev_status.md.)
+    env_type = env_cfg.get("type")
+    env_container = env_cfg.get("container")
     modules = env_cfg.get("modules", defaults.get("environment", {}).get("default_modules", []))
 
     base_params = exp.get("base_params", {})
@@ -160,7 +178,30 @@ def launch(experiment_file: str, dry_run: bool, max_jobs: int | None, partition:
             for stage in pipeline:
                 stage_name = stage["name"]
                 script = stage["script"]
-                args = stage.get("args", "").replace("{config_path}", config_path)
+                # BUG-K2 fix: previously only `{config_path}` was substituted
+                # via str.replace, leaving every other manifest token
+                # (`{hdf5}`, `{exp_id}`, `{config_id}`, sweep keys, …) as a
+                # literal in the sbatch args -> argparse failed at runtime.
+                # Now we expose base_params + per-combo sweep keys + meta keys
+                # via str.format_map, raising on truly missing keys so the
+                # author hears about typos rather than silent skips.
+                fmt_ctx = {
+                    **{k: v for k, v in base_params.items() if k != "_exp_id"},
+                    **{k: v for k, v in config.items() if not k.startswith("_")},
+                    "exp_id": exp_id,
+                    "config_path": config_path,
+                }
+                raw_args = stage.get("args", "")
+                try:
+                    args = raw_args.format_map(_StrictFormatDict(fmt_ctx))
+                except KeyError as e:
+                    click.echo(
+                        f"  [{exp_id}/{stage_name}] manifest references "
+                        f"unknown placeholder {{{e.args[0]}}}; available keys: "
+                        f"{sorted(fmt_ctx.keys())}",
+                        err=True,
+                    )
+                    sys.exit(2)
 
                 slurm_script = generate_pipeline_script(
                     project=project,
@@ -177,6 +218,8 @@ def launch(experiment_file: str, dry_run: bool, max_jobs: int | None, partition:
                     comment=comment,
                     modules=modules,
                     conda_env=conda_env,
+                    env_type=env_type,
+                    env_container=env_container,
                     config_path=config_path,
                 )
 
@@ -221,6 +264,8 @@ def launch(experiment_file: str, dry_run: bool, max_jobs: int | None, partition:
                 comment=comment,
                 modules=modules,
                 conda_env=conda_env,
+                env_type=env_type,
+                env_container=env_container,
                 config_path=config_path,
             )
 

@@ -41,6 +41,8 @@ def generate_single_gpu_script(
     comment: str = "pytorch",
     modules: list[str] | None = None,
     conda_env: str = "base",
+    env_type: str | None = None,
+    env_container: str | None = None,
     config_path: str = "",
 ) -> str:
     """Generate a single-GPU SLURM script."""
@@ -58,6 +60,8 @@ def generate_single_gpu_script(
         comment=comment,
         modules=modules or ["cuda/12.4.1"],
         conda_env=conda_env,
+        env_type=env_type,
+        env_container=env_container,
         config_path=config_path,
     )
 
@@ -75,6 +79,8 @@ def generate_multi_gpu_script(
     comment: str = "pytorch",
     modules: list[str] | None = None,
     conda_env: str = "base",
+    env_type: str | None = None,
+    env_container: str | None = None,
     config_path: str = "",
 ) -> str:
     """Generate a multi-GPU distributed training SLURM script."""
@@ -92,6 +98,8 @@ def generate_multi_gpu_script(
         comment=comment,
         modules=modules or ["cuda/12.4.1"],
         conda_env=conda_env,
+        env_type=env_type,
+        env_container=env_container,
         config_path=config_path,
     )
 
@@ -147,6 +155,8 @@ def generate_pipeline_script(
     comment: str = "pytorch",
     modules: list[str] | None = None,
     conda_env: str = "base",
+    env_type: str | None = None,
+    env_container: str | None = None,
     config_path: str = "",
 ) -> str:
     """Generate a pipeline stage SLURM script with optional dependency."""
@@ -166,5 +176,7 @@ def generate_pipeline_script(
         comment=comment,
         modules=modules or ["cuda/12.4.1"],
         conda_env=conda_env,
+        env_type=env_type,
+        env_container=env_container,
         config_path=config_path,
     )

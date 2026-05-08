@@ -14,9 +14,6 @@
 {% for mod in modules %}
 module load {{ mod }}
 {% endfor %}
-{% if conda_env and conda_env != 'base' %}
-export PATH=$HOME/.conda/envs/{{ conda_env }}/bin:$PATH
-{% endif %}
 
 # === Working Directory ===
 cd /scratch/{{ user }}/projects/{{ project }}
@@ -28,12 +25,26 @@ export WANDB_MODE=offline
 export MASTER_ADDR=$(hostname)
 export MASTER_PORT=29500
 
-torchrun \
-    --nproc_per_node={{ gpus }} \
-    --nnodes={{ nodes }} \
-    --master_addr=${MASTER_ADDR} \
-    --master_port=${MASTER_PORT} \
+# === Distributed launch === (BUG-K1 fix: respect environment.type)
+{% if env_type == "singularity" %}
+singularity exec --nv \
+    --bind /scratch/{{ user }}:/scratch/{{ user }} \
+    {{ env_container }} \
+    torchrun --nproc_per_node={{ gpus }} --nnodes={{ nodes }} \
+        --master_addr=${MASTER_ADDR} --master_port=${MASTER_PORT} \
+        {{ script }} {{ args }}
+{% elif env_type == "conda" %}
+source /apps/applications/Miniconda/25.11.1/etc/profile.d/conda.sh
+export CONDA_ENVS_PATH=/scratch/{{ user }}/.conda_envs:$CONDA_ENVS_PATH
+conda activate {{ conda_env }}
+torchrun --nproc_per_node={{ gpus }} --nnodes={{ nodes }} \
+    --master_addr=${MASTER_ADDR} --master_port=${MASTER_PORT} \
     {{ script }} {{ args }}
+{% else %}
+torchrun --nproc_per_node={{ gpus }} --nnodes={{ nodes }} \
+    --master_addr=${MASTER_ADDR} --master_port=${MASTER_PORT} \
+    {{ script }} {{ args }}
+{% endif %}
 
 # === Record Completion ===
 EXIT_CODE=$?
