@@ -2,7 +2,7 @@
 ssh:
   login_host: neuron.ksc.re.kr
   dm_host: neuron-dm.ksc.re.kr
-  user: "x3320a02"  
+  user: "YOUR_ID"  
   port: 22
   control_persist: "4h"
   control_path: "~/.ssh/sockets/%r@%h-%p"
