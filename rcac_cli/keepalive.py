@@ -6,8 +6,42 @@ import subprocess
 
 import click
 
-from .config import get_rcac_config, require_user
+from .config import get_rcac_config, require_account, require_user
+from .gilbreth import emit_warnings
+from .scheduler import generate_keepalive_script
 from .ssh import ssh_opt_argv, ssh_target
+
+# --------------------------------------------------------------------------
+# The keepalive job's submission policy (AC-6.4)
+#
+# This module decides *what kind of job* a `touch -a` sweep deserves;
+# `scheduler.generate_keepalive_script` decides what the header looks like and
+# `gilbreth.build_directives` decides whether the combination is legal.  The
+# pre-port header hardcoded a partition from the previous cluster and a job
+# class Gilbreth has no flag for, and nothing checked either.
+# --------------------------------------------------------------------------
+
+#: Uncharged, low priority, capped at 4 hours -- three properties that all fit
+#: a job whose entire body is `find ... -exec touch -a`.  Waiting in the
+#: standby queue costs the user nothing; running in `normal` would bill the
+#: allocation for file maintenance.
+KEEPALIVE_QOS = "standby"
+
+#: Ten minutes, unchanged from the pre-port script and far inside the standby
+#: cap.  Named rather than inlined so the 4-hour cap has something to be
+#: compared against when someone raises it.
+KEEPALIVE_WALLTIME = "00:10:00"
+
+#: Deliberately small: the job runs `find`, not a model.  Without this the
+#: choke point would size memory from the GPU count and ask for 32G.
+KEEPALIVE_MEM = "4G"
+
+#: The fallback GPU type, used only when the config names no partition.  Every
+#: Gilbreth partition is a GPU partition and `--gpus-per-node` has a floor of
+#: 1, so a keepalive job cannot avoid holding a GPU -- it can only hold the
+#: least contended one.  `a10` is the smallest documented card (24GB, 3/node).
+#: C6's AC-6.5 makes the login-node form the default for exactly this reason.
+KEEPALIVE_FALLBACK_PARTITION = "a10"
 
 # Patterns for important files to keep alive
 KEEPALIVE_PATTERNS = [
@@ -131,6 +165,13 @@ def setup_cron(interval: int) -> None:
     require_user(cfg)
 
     user = cfg["ssh"]["user"]
+    # Still the pre-port literal, and still wrong for Gilbreth, whose scratch
+    # root is /scratch/gilbreth/<user>. C6 replaces all three occurrences in
+    # this module with config.scratch_root() (AC-6.2). The header below does
+    # NOT go through here: it renders `scratch_root` from paths.scratch, which
+    # is what AC-6.4's "inherits every AC-3 guarantee" requires. Until C6 lands
+    # the generated job therefore names two different roots -- the correct one
+    # in -o/-e, the stale one in the body.
     scratch = f"/scratch/{user}"
 
     # Create the keepalive script on RCAC
@@ -156,19 +197,32 @@ echo "$(date): Keepalive complete"
     escaped = script_content.replace("'", "'\\''")
     _run_remote(cfg, f"echo '{escaped}' > {remote_script} && chmod +x {remote_script}")
 
-    # Create a minimal SLURM job for keepalive (runs on login node CPU, minimal resources)
-    slurm_script = f"""#!/bin/bash
-#SBATCH -J rcac_keepalive
-#SBATCH -p cas_v100_2
-#SBATCH --nodes=1
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=1
-#SBATCH --time=00:10:00
-#SBATCH --comment keepalive
-#SBATCH -o {scratch}/logs/keepalive_%j.out
-
-bash {remote_script}
-"""
+    # The batch job that runs it.  Rendered from a SubmissionPlan through the
+    # same shared header as every other job, so it inherits every AC-3
+    # guarantee -- including the ones this command used to get wrong: a
+    # partition that does not exist on Gilbreth, no account at all, and a job
+    # class the scheduler has no flag for.
+    #
+    # `-p` prefers whatever the user already put in their config over the
+    # fallback: someone who knows which GPU type their account can reach knows
+    # better than a constant here.  The `slurm.partition` key is optional and
+    # `configs/rcac.yaml` ships without it.
+    partition = (cfg.get("slurm") or {}).get("partition") or (
+        KEEPALIVE_FALLBACK_PARTITION
+    )
+    plan_out: list = []
+    slurm_script = generate_keepalive_script(
+        remote_script,
+        account=require_account(cfg),
+        partition=partition,
+        qos=KEEPALIVE_QOS,
+        time=KEEPALIVE_WALLTIME,
+        mem=KEEPALIVE_MEM,
+        config=cfg,
+        plan_out=plan_out,
+    )
+    for plan in plan_out:
+        emit_warnings(plan.warnings)
 
     remote_slurm = f"{scratch}/.rcac-tools/keepalive_job.sh"
     escaped_slurm = slurm_script.replace("'", "'\\''")

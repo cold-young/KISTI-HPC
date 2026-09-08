@@ -1,0 +1,28 @@
+{#-
+  The keepalive job (AC-6.4).  `rcac-keepalive setup-cron` used to build this
+  header by hand in Python -- it was the only non-template site in the package
+  that spelled the directive token, and what it spelled was the previous
+  cluster's: a partition that does not exist on Gilbreth and a job-class
+  annotation Gilbreth has no flag for.
+
+  It renders from the same rcac_cli.gilbreth.SubmissionPlan as every other job,
+  through the same shared header, so it inherits every AC-3 guarantee rather
+  than a subset someone remembered to copy.  There is nothing keepalive-shaped
+  in the header at all; the only local directives are -o/-e, whose filename
+  pattern is per-template by design.
+
+  `keepalive_script` is the path of the shell script this job runs.  The job
+  itself is a `touch -a` sweep, which is why the caller pairs it with -q
+  standby: uncharged, and the 4 hour cap is two orders of magnitude more than
+  it needs.  C6 makes the login-node form the default (AC-6.5) precisely
+  because even this job holds a GPU it never uses -- on Gilbreth every
+  partition is a GPU partition and --gpus-per-node has a floor of 1.
+-#}
+#!/bin/bash
+{% include '_sbatch_header.j2' %}
+#SBATCH -o {{ scratch_root }}/logs/%x_%j.out
+#SBATCH -e {{ scratch_root }}/logs/%x_%j.err
+
+echo "$(date): keepalive job starting"
+bash {{ keepalive_script }}
+echo "$(date): keepalive job complete"

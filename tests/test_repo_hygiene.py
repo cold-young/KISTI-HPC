@@ -96,7 +96,7 @@ COMMIT_ORDER: Tuple[str, ...] = (
 #: The commit currently being authored.  Bump this as each commit lands; every
 #: row whose ``earliest_commit`` is <= this value becomes enforced.  Rows above
 #: it are inactive *by construction* -- filtered out, never skipped (AC-7.6).
-ACTIVE_COMMIT = "C2"
+ACTIVE_COMMIT = "C3c"
 
 
 def commit_index(commit: str) -> int:
@@ -198,10 +198,18 @@ COMMIT_CHANGE_LISTS: dict[str, set[str]] = {
         "tests/test_golden.py",
         "tests/golden/**",
     },
-    # C3c -- the two non-scheduler producers.
+    # C3c -- the two non-scheduler producers, and AC-3.19 turned on.  Wider
+    # than the plan's two paths: keepalive's header could only stop being a
+    # Python f-string by becoming a template, which needs a fifth generator to
+    # render it, which the "exactly four job templates" assertion notices.
     "C3c": {
         "{pkg}/keepalive.py",
         "{pkg}/simulator.py",
+        "{pkg}/scheduler.py",
+        "{pkg}/templates/**",
+        "tests/test_scheduler.py",
+        "tests/test_choke_point.py",
+        "tests/test_repo_hygiene.py",
     },
     # C4 -- environment and container runtime.  This is where
     # `templates/pipeline.sh.j2:42` ("KISTI's tight quota") is finally deleted.
@@ -391,6 +399,27 @@ HYGIENE_SCOPE: Tuple[HygieneRow, ...] = (
         kind="shell",
         note="A built wheel contains every source template by name, and "
         "{pkg}/configs/*.yaml. Requires `python -m build`; see section 6.1.",
+    ),
+    # ---------------------------------------------------------------- AC-3
+    HygieneRow(
+        ac_id="AC-3.19a",
+        earliest_commit="C3c",
+        path_globs=("{pkg}/**/*.py",),
+        allowlist=(),
+        kind="test",
+        pattern=r"#SBATCH",
+        note="Header construction, half (a) of the choke point. keepalive.py "
+        "was the only non-template site that built directive literals, and "
+        "what it built named the previous cluster's partition plus a job "
+        "class Gilbreth has no flag for. A TEXT scan and not an AST walk: the "
+        "token only ever appears inside string literals, so a text scan is "
+        "exact, whereas an AST walk would be an elaborate way to answer the "
+        "same question. Scope is the package's *.py only -- the templates are "
+        "*.j2 and are where the token belongs, and tests assert on rendered "
+        "output by construction. This bans it in gilbreth.py too, which AC-3.19 "
+        "would permit: after C3c the choke point validates values and renders "
+        "nothing, so the permission has no user and an unused exemption is "
+        "just a hole waiting for one.",
     ),
     # ---------------------------------------------------------------- AC-5
     HygieneRow(

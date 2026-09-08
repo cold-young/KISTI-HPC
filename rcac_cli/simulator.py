@@ -13,7 +13,8 @@ from pathlib import Path
 import click
 import yaml
 
-from .config import get_defaults, get_rcac_config, require_user
+from .config import get_defaults, get_rcac_config, require_account, require_user
+from .gilbreth import DEFAULT_QOS, build_directives, emit_warnings
 from .ssh import ssh_opt_argv, ssh_target
 
 # Simulator compatibility matrix with RCAC GPUs
@@ -75,6 +76,29 @@ PARTITION_GPU = {
     "cas_v100_2": "V100",
 }
 
+# --------------------------------------------------------------------------
+# What `init-pipeline` asks for on behalf of the user (AC-3.19(b))
+#
+# These three were inline in the `slurm:` dict literal this command wrote into
+# generated YAML.  They are named here because that dict is now built by
+# `SubmissionPlan.to_slurm_dict()`, and the values it is built *from* are the
+# only thing this module still chooses.
+# --------------------------------------------------------------------------
+
+#: A day of data generation.  Legal under `-q normal` (14-day cap) and under
+#: `-q training`; `build_directives` is what knows that, not this module.
+PIPELINE_WALLTIME = "24:00:00"
+
+#: Two GPUs per node, as the pre-port `gpus: 2` asked for.  Written out as
+#: `gpus_per_node`, which is Gilbreth's documented request form -- the old
+#: spelling reached `rcac-exp launch` as a deprecation warning on a file this
+#: command had just generated.
+PIPELINE_GPUS_PER_NODE = 2
+
+#: No documented Gilbreth rule constrains this, so it is not on the plan and
+#: is added to the mapping afterwards.
+PIPELINE_CPUS_PER_GPU = 8
+
 
 def _run_remote(cfg: dict, command: str) -> subprocess.CompletedProcess:
     cmd = ["ssh", *ssh_opt_argv(cfg), ssh_target(cfg), command]
@@ -98,11 +122,14 @@ def check_compatibility(simulator: str, partition: str) -> dict:
             "reason": f"{sim['display_name']} is not supported on {gpu_type} ({partition}). {sim['notes']}",
         }
 
+    # No `partition` key: it echoed back an argument every caller already had,
+    # and after C3c a dict carrying that key is a *submission*, which this is
+    # not -- this is a compatibility report.  AC-3.19(b) reads the distinction
+    # structurally, so the dead key had to go rather than be excused.
     return {
         "compatible": True,
         "simulator": sim["display_name"],
         "gpu": gpu_type,
-        "partition": partition,
         "container": sim["container"],
         "comment": sim["slurm_comment"],
     }
@@ -199,7 +226,31 @@ def check_env(simulator: str) -> None:
 @click.option("--output", "-o", default="experiment_sim.yaml", help="Output experiment file")
 @click.option("--partition", "-p", default="amd_a100nv_8", help="Target partition")
 def init_pipeline(simulator: str, env_name: str, episodes: int, output: str, partition: str) -> None:
-    """Generate a simulation -> training -> evaluation experiment.yaml."""
+    """Generate a simulation -> training -> evaluation experiment.yaml.
+
+    The ``slurm:`` block is validated **here**, at generation time, not at
+    ``rcac-exp launch`` (AC-3.19(b)).  This command builds no batch header at
+    all, which is exactly why it was the bypass a scan for directive literals
+    cannot see: it writes directive *values* into a YAML file, and an illegal
+    partition/QOS pair in that file survives happily until someone submits it
+    -- possibly on another machine, days later, having assumed that a
+    generated file was a valid one.
+    """
+    cfg = get_rcac_config()
+
+    # Validated before the compatibility check, and before anything is
+    # written.  An illegal submission is illegal regardless of which simulator
+    # asked for it, and the file must not exist if it cannot be launched.
+    plan = build_directives(
+        account=require_account(cfg),
+        partition=partition,
+        qos=DEFAULT_QOS,
+        time=PIPELINE_WALLTIME,
+        gpus_per_node=PIPELINE_GPUS_PER_NODE,
+        nodes=1,
+    )
+    emit_warnings(plan.warnings)
+
     compat = check_compatibility(simulator, partition)
     if not compat["compatible"]:
         click.echo(f"Error: {compat['reason']}")
@@ -207,18 +258,19 @@ def init_pipeline(simulator: str, env_name: str, episodes: int, output: str, par
 
     sim = SIMULATOR_COMPAT[simulator]
 
+    slurm = plan.to_slurm_dict()
+    # The account is validated but not written.  `rcac-exp launch` resolves it
+    # from RCAC_ACCOUNT / the config *ahead* of the manifest precisely so a
+    # user is never nudged into committing their allocation into a file they
+    # share (P4), so writing it here would be both ignored and a leak.
+    del slurm["account"]
+    slurm["cpus_per_gpu"] = PIPELINE_CPUS_PER_GPU
+
     # Build the experiment YAML
     experiment = {
         "project": f"{env_name}_{simulator}",
         "description": f"{sim['display_name']} simulation + training pipeline for {env_name}",
-        "slurm": {
-            "partition": partition,
-            "nodes": 1,
-            "gpus": 2,
-            "cpus_per_gpu": 8,
-            "time": "24:00:00",
-            "comment": sim["slurm_comment"],
-        },
+        "slurm": slurm,
         "environment": {
             "type": "singularity" if sim["container"] else "conda",
             "name": f"{simulator}_env",

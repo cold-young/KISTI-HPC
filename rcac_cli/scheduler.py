@@ -3,10 +3,15 @@
 **Every generator here renders from a
 :class:`rcac_cli.gilbreth.SubmissionPlan`.**  That is the whole point of this
 module's shape: :func:`rcac_cli.gilbreth.build_directives` is the choke point,
-and the four ``generate_*_script`` functions call it themselves rather than
+and the ``generate_*_script`` functions call it themselves rather than
 accepting pre-validated directives from a caller.  A caller therefore cannot
 bypass validation without bypassing this module entirely -- which is what
-AC-3.19's two assertions look for, once C3c wires the remaining two producers.
+AC-3.19's two assertions look for.
+
+C3c added the fifth generator, :func:`generate_keepalive_script`.  It is here
+and not in ``keepalive.py`` so that the directive token lives only in
+``templates/``: after C3c no ``.py`` file in the package spells it at all,
+which is the form AC-3.19(a)'s text scan takes.
 
 The signatures changed materially at C3b and are deliberately *not* backwards
 compatible:
@@ -106,20 +111,24 @@ def _plan_context(plan: SubmissionPlan, *, job_name: str, cpus_per_gpu: int) -> 
         Gilbreth rule constrains it, and putting an unconstrained value on the
         plan would suggest ``build_directives`` had checked it.  It is threaded
         separately for exactly that reason.
+
+    The directive values come from :meth:`SubmissionPlan.to_slurm_dict`, not
+    from a dict literal spelled here.  That is C3c's doing and it is what makes
+    AC-3.19(b) exact rather than allowlisted: the header context and the
+    ``slurm:`` mapping ``simulator.py`` writes into generated YAML are now the
+    *same* mapping, so "no module outside ``gilbreth.py`` builds a dict literal
+    carrying a ``partition`` or ``qos`` key" holds with zero exemptions.
+
+    ``constraint`` is restored when :meth:`to_slurm_dict` omitted it.  The
+    header evaluates ``{% if constraint %}`` on every render and ``jinja2``
+    runs under ``StrictUndefined``, so absent is not the same as ``None`` here
+    -- absent raises.  Suppression must reach the template as a value.
     """
-    return {
-        "job_name": job_name,
-        "account": plan.account,
-        "partition": plan.partition,
-        "qos": plan.qos,
-        "time": plan.time,
-        "nodes": plan.nodes,
-        "ntasks_per_node": plan.ntasks_per_node,
-        "gpus_per_node": plan.gpus_per_node,
-        "mem": plan.mem,
-        "constraint": plan.constraint,
-        "cpus_per_gpu": cpus_per_gpu,
-    }
+    context = plan.to_slurm_dict()
+    context.setdefault("constraint", None)
+    context["job_name"] = job_name
+    context["cpus_per_gpu"] = cpus_per_gpu
+    return context
 
 
 def _build(
@@ -399,6 +408,66 @@ def generate_pipeline_script(
         **_plan_context(
             plan,
             job_name=job_name or f"{project}_{stage_name}_{exp_id}",
+            cpus_per_gpu=cpus_per_gpu,
+        ),
+    )
+
+
+def generate_keepalive_script(
+    keepalive_script: str,
+    *,
+    account: str,
+    partition: str,
+    time: str,
+    qos: str = DEFAULT_QOS,
+    nodes: int = 1,
+    gpus_per_node: int = 1,
+    cpus_per_gpu: int = 1,
+    mem: str | None = None,
+    constraint: str | None = None,
+    known_partitions: Sequence[str] | None = None,
+    job_name: str | None = None,
+    template_dir: str | Path | None = None,
+    config: dict | None = None,
+    plan_out: list | None = None,
+) -> str:
+    """Generate the batch script for ``rcac-keepalive setup-cron`` (AC-6.4).
+
+    The fifth generator, and the reason C3c exists.  ``keepalive.py`` built
+    this header by hand from an f-string, which made it the one place in the
+    package where a submission reached a cluster without passing
+    :func:`rcac_cli.gilbreth.build_directives` -- and it showed: the header it
+    built named the previous cluster's partition and a job class Gilbreth does
+    not have.
+
+    It lives here rather than in ``keepalive.py`` for the same reason the other
+    four do: the choke point is called through :func:`_build`, once, and
+    ``keepalive.py`` is left holding a *policy* (which QOS a file-touching job
+    deserves) rather than a header.
+
+    ``keepalive_script`` is the remote path of the shell script the job runs.
+    """
+    plan = _build(
+        account=account,
+        partition=partition,
+        time=time,
+        qos=qos,
+        gpus_per_node=gpus_per_node,
+        nodes=nodes,
+        mem=mem,
+        constraint=constraint,
+        known_partitions=known_partitions,
+    )
+    if plan_out is not None:
+        plan_out.append(plan)
+    return render_slurm_script(
+        "keepalive.sh.j2",
+        template_dir=template_dir,
+        config=config,
+        keepalive_script=keepalive_script,
+        **_plan_context(
+            plan,
+            job_name=job_name or "rcac_keepalive",
             cpus_per_gpu=cpus_per_gpu,
         ),
     )

@@ -151,9 +151,19 @@ def test_every_template_includes_the_shared_header(filename: str) -> None:
     )
 
 
-def test_there_are_exactly_four_job_templates() -> None:
+def test_the_template_directory_holds_exactly_the_known_templates() -> None:
+    """Four experiment templates, plus the keepalive job C3c moved in here.
+
+    ``keepalive.sh.j2`` is not an experiment template and is not rendered by
+    ``rcac-exp``; it is here because a template is the only place a ``#SBATCH``
+    literal may live (AC-3.19(a)), and ``keepalive.py`` used to build one from
+    an f-string.  It earns its place in the two parametrised assertions above
+    the same way the other four do -- it includes the shared header and
+    composes no job name of its own.
+    """
     assert TEMPLATE_FILES == [
         "job_array.sh.j2",
+        "keepalive.sh.j2",
         "multi_gpu.sh.j2",
         "pipeline.sh.j2",
         "single_gpu.sh.j2",
