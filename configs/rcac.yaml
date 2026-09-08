@@ -1,4 +1,4 @@
-# Neuron HPC 접속 설정
+# RCAC HPC 접속 설정
 ssh:
   login_host: neuron.ksc.re.kr
   dm_host: neuron-dm.ksc.re.kr

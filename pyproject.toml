@@ -3,9 +3,9 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "neuron-cli"
+name = "rcac-cli"
 version = "0.1.0"
-description = "KISTI Neuron HPC workflow automation CLI"
+description = "RCAC HPC workflow automation CLI"
 requires-python = ">=3.9"
 dependencies = [
     "click>=8.0",
@@ -22,18 +22,18 @@ dev = [
 ]
 
 [project.scripts]
-neuron-connect = "neuron_cli.connect:connect"
-neuron-status = "neuron_cli.connect:status"
-neuron-disconnect = "neuron_cli.connect:disconnect"
-neuron-sync = "neuron_cli.sync:cli"
-neuron-env = "neuron_cli.env:cli"
-neuron-exp = "neuron_cli.experiment:cli"
-neuron-results = "neuron_cli.results:cli"
-neuron-container = "neuron_cli.container:cli"
-neuron-partition = "neuron_cli.partition_selector:select_partition"
-neuron-keepalive = "neuron_cli.keepalive:cli"
-neuron-notify = "neuron_cli.notify:cli"
-neuron-sim = "neuron_cli.simulator:cli"
+rcac-connect = "rcac_cli.connect:connect"
+rcac-status = "rcac_cli.connect:status"
+rcac-disconnect = "rcac_cli.connect:disconnect"
+rcac-sync = "rcac_cli.sync:cli"
+rcac-env = "rcac_cli.env:cli"
+rcac-exp = "rcac_cli.experiment:cli"
+rcac-results = "rcac_cli.results:cli"
+rcac-container = "rcac_cli.container:cli"
+rcac-partition = "rcac_cli.partition_selector:select_partition"
+rcac-keepalive = "rcac_cli.keepalive:cli"
+rcac-notify = "rcac_cli.notify:cli"
+rcac-sim = "rcac_cli.simulator:cli"
 
 [tool.setuptools.packages.find]
-include = ["neuron_cli*"]
+include = ["rcac_cli*"]

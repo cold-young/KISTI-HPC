@@ -11,7 +11,7 @@ import re
 
 import pytest
 
-from neuron_cli.scheduler import (
+from rcac_cli.scheduler import (
     generate_job_array_script,
     generate_multi_gpu_script,
     generate_pipeline_script,

@@ -1,4 +1,4 @@
-"""Simulator integration for Genesis, MuJoCo, and Isaac Gym on Neuron HPC.
+"""Simulator integration for Genesis, MuJoCo, and Isaac Gym on RCAC HPC.
 
 Provides environment validation, data generation pipeline support,
 and simulator-specific SLURM configuration helpers.
@@ -13,9 +13,9 @@ from pathlib import Path
 import click
 import yaml
 
-from .config import get_defaults, get_neuron_config
+from .config import get_defaults, get_rcac_config
 
-# Simulator compatibility matrix with Neuron GPUs
+# Simulator compatibility matrix with RCAC GPUs
 SIMULATOR_COMPAT = {
     "genesis": {
         "display_name": "Genesis",
@@ -51,7 +51,7 @@ SIMULATOR_COMPAT = {
         "container": None,
         "pip_package": None,
         "slurm_comment": "isaacsim",
-        "notes": "NOT SUPPORTED on Neuron. Requires RT Core GPUs.",
+        "notes": "NOT SUPPORTED on RCAC. Requires RT Core GPUs.",
     },
     "pybullet": {
         "display_name": "PyBullet",
@@ -137,14 +137,14 @@ def generate_datagen_config(
 
 @click.group()
 def cli() -> None:
-    """Simulator management for Neuron HPC."""
+    """Simulator management for RCAC HPC."""
 
 
 @cli.command("compat")
 @click.argument("simulator", type=click.Choice(list(SIMULATOR_COMPAT.keys())))
 @click.option("--partition", "-p", default="amd_a100nv_8", help="Target partition")
 def check_compat(simulator: str, partition: str) -> None:
-    """Check simulator compatibility with a Neuron partition."""
+    """Check simulator compatibility with a RCAC partition."""
     result = check_compatibility(simulator, partition)
 
     if result["compatible"]:
@@ -158,7 +158,7 @@ def check_compat(simulator: str, partition: str) -> None:
 
 @cli.command("list")
 def list_simulators() -> None:
-    """Show all simulators and their Neuron GPU compatibility."""
+    """Show all simulators and their RCAC GPU compatibility."""
     click.echo(f"{'Simulator':<22} {'V100':<8} {'A100':<8} {'H200':<8} {'Notes'}")
     click.echo("-" * 90)
 
@@ -172,11 +172,11 @@ def list_simulators() -> None:
 @cli.command("check-env")
 @click.argument("simulator", type=click.Choice(["genesis", "mujoco", "isaac_gym", "pybullet"]))
 def check_env(simulator: str) -> None:
-    """Verify simulator is installed on Neuron."""
-    cfg = get_neuron_config()
+    """Verify simulator is installed on RCAC."""
+    cfg = get_rcac_config()
 
     if not cfg["ssh"]["user"]:
-        click.echo("Error: NEURON_USER not set.")
+        click.echo("Error: RCAC_USER not set.")
         sys.exit(1)
 
     sim = SIMULATOR_COMPAT[simulator]
@@ -197,7 +197,7 @@ def check_env(simulator: str) -> None:
         click.echo(f"{sim['display_name']}: NOT FOUND")
         click.echo(f"  Install: pip install {pkg}")
         if sim["container"]:
-            click.echo(f"  Or use container: neuron-container build containers/{sim['container'].replace('.sif', '.def')}")
+            click.echo(f"  Or use container: rcac-container build containers/{sim['container'].replace('.sif', '.def')}")
 
 
 @cli.command("init-pipeline")
@@ -262,7 +262,7 @@ def init_pipeline(simulator: str, env_name: str, episodes: int, output: str, par
 
     # Add container config if applicable
     if sim["container"]:
-        experiment["environment"]["container"] = f"/scratch/$USER/.neuron-tools/{sim['container']}"
+        experiment["environment"]["container"] = f"/scratch/$USER/.rcac-tools/{sim['container']}"
 
     with open(output, "w") as f:
         yaml.dump(experiment, f, default_flow_style=False, sort_keys=False)
@@ -272,8 +272,8 @@ def init_pipeline(simulator: str, env_name: str, episodes: int, output: str, par
     for i, stage in enumerate(experiment["pipeline"], 1):
         dep = f" (after: {stage['depends_on']})" if stage.get("depends_on") else ""
         click.echo(f"  {i}. {stage['name']}: {stage['script']}{dep}")
-    click.echo(f"\nTo launch: neuron-exp launch {output}")
-    click.echo(f"To dry-run: neuron-exp launch {output} --dry-run")
+    click.echo(f"\nTo launch: rcac-exp launch {output}")
+    click.echo(f"To dry-run: rcac-exp launch {output} --dry-run")
 
 
 @cli.command("scaffold")
@@ -304,7 +304,7 @@ def scaffold(simulator: str, env_name: str, output_dir: str) -> None:
         click.echo(f"  Created: {train_file}")
 
     click.echo(f"\nScaffold complete for {sim['display_name']} / {env_name}")
-    click.echo(f"Next: neuron-sim init-pipeline {simulator} --env {env_name}")
+    click.echo(f"Next: rcac-sim init-pipeline {simulator} --env {env_name}")
 
 
 def _scaffold_datagen(simulator: str, env_name: str) -> str:

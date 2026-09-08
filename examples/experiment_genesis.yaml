@@ -1,5 +1,5 @@
 # Genesis simulation -> training -> evaluation pipeline
-# Usage: neuron-exp launch examples/experiment_genesis.yaml
+# Usage: rcac-exp launch examples/experiment_genesis.yaml
 
 project: manipulation_genesis
 description: "Vision-based manipulation with Genesis simulator"
@@ -15,7 +15,7 @@ slurm:
 environment:
   type: singularity
   name: genesis_env
-  container: /scratch/$USER/.neuron-tools/genesis-sim.sif
+  container: /scratch/$USER/.rcac-tools/genesis-sim.sif
   modules:
     - cuda/12.4.1
 

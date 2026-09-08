@@ -1,6 +1,6 @@
 """Tests for SLURM script generation."""
 
-from neuron_cli.scheduler import generate_single_gpu_script, generate_pipeline_script
+from rcac_cli.scheduler import generate_single_gpu_script, generate_pipeline_script
 
 
 def test_single_gpu_script_contains_required_fields():

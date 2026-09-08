@@ -28,8 +28,8 @@ def render_slurm_script(
     # Inject user if not provided
     if "user" not in kwargs:
         if config is None:
-            from .config import get_neuron_config
-            config = get_neuron_config()
+            from .config import get_rcac_config
+            config = get_rcac_config()
         kwargs["user"] = config["ssh"]["user"]
     if template_dir is None:
         template_dir = get_template_dir()

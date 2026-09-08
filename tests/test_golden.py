@@ -1,19 +1,19 @@
 """Golden snapshots of rendered SLURM scripts.
 
-Two sets are captured, and they are not redundant:
-
 ``tests/golden/injected/``
     Rendered through the injection points of :func:`render_slurm_script`
     (explicit ``config``, explicit ``template_dir``). Nothing on disk outside
     ``templates/`` influences the result, so this set is a pure template
     regression guard.
 
-``tests/golden/realconfig/``
-    Rendered through the default path: the real config loader plus the on-disk
-    ``configs/`` YAML. This set is the meaningful gate for the mechanical
-    rename commit, because that commit renames the loader function, the
-    ``load_config`` default name, *and* the config file. Renaming one but not
-    the others breaks these snapshots.
+A second set, ``tests/golden/realconfig/``, was captured at C0 and rendered
+through the default path -- the real config loader plus the on-disk ``configs/``
+YAML. It was the gate for the C1 mechanical rename, which renames the loader
+function, the ``load_config`` default name, *and* the config file: renaming one
+but not the others would have broken it. It rendered byte-identical across C1
+and was retired at the end of that commit (plan section 8.3), because C2 kills
+it twice over -- the placeholder becomes ``YOUR_PURDUE_ID`` and the new
+``scratch_root`` accessor changes how paths resolve.
 
 Regenerate deliberately (never to make a red test go green) with::
 
@@ -27,7 +27,7 @@ from pathlib import Path
 
 import pytest
 
-from neuron_cli.scheduler import (
+from rcac_cli.scheduler import (
     generate_job_array_script,
     generate_multi_gpu_script,
     generate_pipeline_script,
@@ -100,7 +100,6 @@ SETS = {
         "template_dir": get_template_dir(),
         "config": INJECTED_CONFIG,
     },
-    "realconfig": lambda: {},
 }
 
 
@@ -142,22 +141,10 @@ def test_golden_snapshot_matches(set_name: str, case_name: str) -> None:
         )
 
 
-@pytest.mark.parametrize("case_name", list(CASES))
-def test_injected_and_realconfig_sets_differ(case_name: str) -> None:
-    """The injected config must actually reach the template.
-
-    If these two sets were byte-identical the injected set would be dead
-    weight and a broken ``config`` parameter would go unnoticed.
-    """
-    assert golden_path("injected", case_name).read_bytes() != golden_path(
-        "realconfig", case_name
-    ).read_bytes()
-
-
 def test_template_dir_injection_is_honoured(tmp_path: Path) -> None:
     """``template_dir`` must select the loader root, not be ignored."""
     (tmp_path / "single_gpu.sh.j2").write_text("sentinel {{ project }} {{ user }}\n")
-    from neuron_cli.scheduler import render_slurm_script
+    from rcac_cli.scheduler import render_slurm_script
 
     out = render_slurm_script(
         "single_gpu.sh.j2",

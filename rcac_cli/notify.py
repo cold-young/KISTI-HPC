@@ -13,7 +13,7 @@ from urllib.request import Request, urlopen
 import click
 import yaml
 
-from .config import get_neuron_config
+from .config import get_rcac_config
 
 
 def _load_notify_config() -> dict:
@@ -92,7 +92,7 @@ def notify_job_result(
     metric_text = f"\nMetric: {metric}" if metric else ""
 
     message = (
-        f"{icon} *Neuron Job {status_text}*\n"
+        f"{icon} *RCAC Job {status_text}*\n"
         f"Job: `{job_name}`\n"
         f"Experiment: `{exp_id}`"
         f"{metric_text}"
@@ -111,7 +111,7 @@ def notify_job_result(
         if not email_cfg.get("to"):
             click.echo("Error: Email not configured in configs/notify.yaml")
             return
-        subject = f"[Neuron] {job_name} - {status_text}"
+        subject = f"[RCAC] {job_name} - {status_text}"
         if send_email(
             smtp_host=email_cfg.get("smtp_host", "smtp.gmail.com"),
             smtp_port=email_cfg.get("smtp_port", 587),
@@ -126,12 +126,12 @@ def notify_job_result(
 
 @click.group()
 def cli() -> None:
-    """Notification management for Neuron HPC jobs."""
+    """Notification management for RCAC HPC jobs."""
 
 
 @cli.command()
 @click.option("--method", "-m", type=click.Choice(["slack", "email"]), default="slack")
-@click.option("--message", default="Test notification from neuron-cli")
+@click.option("--message", default="Test notification from rcac-cli")
 def test(method: str, message: str) -> None:
     """Send a test notification to verify setup."""
     config = _load_notify_config()
@@ -155,7 +155,7 @@ def test(method: str, message: str) -> None:
             smtp_port=email_cfg.get("smtp_port", 587),
             from_addr=email_cfg.get("from", ""),
             to_addr=email_cfg["to"],
-            subject="[Neuron] Test Notification",
+            subject="[RCAC] Test Notification",
             body=message,
             password=email_cfg.get("password"),
         ):

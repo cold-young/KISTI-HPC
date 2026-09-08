@@ -1,4 +1,4 @@
-"""Conda environment management on Neuron HPC."""
+"""Conda environment management on RCAC HPC."""
 
 import shlex
 import subprocess
@@ -8,7 +8,7 @@ from pathlib import Path
 import click
 import yaml
 
-from .config import get_defaults, get_neuron_config
+from .config import get_defaults, get_rcac_config
 
 CONDA_BIN = "/apps/applications/Miniconda/25.11.1/bin/conda"
 
@@ -25,7 +25,7 @@ def _ssh_cmd(cfg: dict) -> list[str]:
 
 
 def _run_remote(cfg: dict, command: str) -> subprocess.CompletedProcess:
-    """Execute a command on Neuron via SSH."""
+    """Execute a command on RCAC via SSH."""
     cmd = _ssh_cmd(cfg) + [command]
     return subprocess.run(cmd, capture_output=True, text=True)
 
@@ -37,7 +37,7 @@ def _get_conda_path(defaults: dict) -> str:
 
 @click.group()
 def cli() -> None:
-    """Manage Conda environments on Neuron HPC."""
+    """Manage Conda environments on RCAC HPC."""
 
 
 @cli.command()
@@ -45,12 +45,12 @@ def cli() -> None:
               help="Conda environment file (default: environment.yml)")
 @click.option("--name", "-n", default=None, help="Environment name (default: from YAML)")
 def setup(from_file: str, name: str) -> None:
-    """Create or update a Conda environment on Neuron from environment.yml."""
-    cfg = get_neuron_config()
+    """Create or update a Conda environment on RCAC from environment.yml."""
+    cfg = get_rcac_config()
     defaults = get_defaults()
 
     if not cfg["ssh"]["user"]:
-        click.echo("Error: NEURON_USER not set.")
+        click.echo("Error: RCAC_USER not set.")
         sys.exit(1)
 
     local_file = Path(from_file)
@@ -61,12 +61,12 @@ def setup(from_file: str, name: str) -> None:
     ssh = cfg["ssh"]
     user = ssh["user"]
     host = ssh["login_host"]
-    remote_tmp = f"/scratch/{user}/.neuron-tools/environment.yml"
+    remote_tmp = f"/scratch/{user}/.rcac-tools/environment.yml"
     conda = _get_conda_path(defaults)
 
-    # Upload environment.yml to Neuron
+    # Upload environment.yml to RCAC
     click.echo("Uploading environment file...")
-    _run_remote(cfg, f"mkdir -p /scratch/{user}/.neuron-tools")
+    _run_remote(cfg, f"mkdir -p /scratch/{user}/.rcac-tools")
     ssh_opt = f"ssh -o ControlPath={ssh['control_path']} -p {ssh['port']}"
     rsync_cmd = ["rsync", "-az", "-e", ssh_opt, str(local_file), f"{user}@{host}:{remote_tmp}"]
     result = subprocess.run(rsync_cmd, capture_output=True, text=True)
@@ -91,7 +91,7 @@ def setup(from_file: str, name: str) -> None:
         f"fi"
     )
 
-    click.echo("Setting up Conda environment on Neuron...")
+    click.echo("Setting up Conda environment on RCAC...")
     result = _run_remote(cfg, remote_cmd)
     click.echo(result.stdout)
     if result.returncode != 0:
@@ -103,7 +103,7 @@ def setup(from_file: str, name: str) -> None:
 @cli.command()
 @click.argument("env_name")
 def activate(env_name: str) -> None:
-    """Print the activation commands for a Neuron environment.
+    """Print the activation commands for a RCAC environment.
 
     For pre-built environments (pytorch, tensorflow), use module load.
     For user environments, use conda run.
@@ -137,12 +137,12 @@ def activate(env_name: str) -> None:
 @click.argument("env_name")
 @click.option("--output", "-o", default="environment.yml", help="Output file path")
 def export(env_name: str, output: str) -> None:
-    """Export a Conda environment from Neuron to a local YAML file."""
-    cfg = get_neuron_config()
+    """Export a Conda environment from RCAC to a local YAML file."""
+    cfg = get_rcac_config()
     defaults = get_defaults()
 
     if not cfg["ssh"]["user"]:
-        click.echo("Error: NEURON_USER not set.")
+        click.echo("Error: RCAC_USER not set.")
         sys.exit(1)
 
     conda = _get_conda_path(defaults)
@@ -159,12 +159,12 @@ def export(env_name: str, output: str) -> None:
 
 @cli.command("list")
 def list_envs() -> None:
-    """List Conda environments on Neuron."""
-    cfg = get_neuron_config()
+    """List Conda environments on RCAC."""
+    cfg = get_rcac_config()
     defaults = get_defaults()
 
     if not cfg["ssh"]["user"]:
-        click.echo("Error: NEURON_USER not set.")
+        click.echo("Error: RCAC_USER not set.")
         sys.exit(1)
 
     conda = _get_conda_path(defaults)
@@ -189,11 +189,11 @@ def list_envs() -> None:
 
 @cli.command("modules")
 def list_modules() -> None:
-    """Show available pre-built conda module environments on Neuron."""
-    cfg = get_neuron_config()
+    """Show available pre-built conda module environments on RCAC."""
+    cfg = get_rcac_config()
 
     if not cfg["ssh"]["user"]:
-        click.echo("Error: NEURON_USER not set.")
+        click.echo("Error: RCAC_USER not set.")
         sys.exit(1)
 
     click.echo("Available pre-built environments (module load):\n")

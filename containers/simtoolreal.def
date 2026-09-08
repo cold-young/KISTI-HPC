@@ -2,8 +2,8 @@ Bootstrap: docker
 From: nvcr.io/nvidia/pytorch:23.10-py3
 
 %labels
-    Author neuron-cli
-    Description SimToolReal (Isaac Gym Preview 4) for KISTI Neuron HPC
+    Author rcac-cli
+    Description SimToolReal (Isaac Gym Preview 4) for RCAC HPC
 
 %post
     # System deps

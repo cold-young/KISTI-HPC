@@ -1,4 +1,4 @@
-"""Configuration loader for neuron-cli."""
+"""Configuration loader for rcac-cli."""
 
 import os
 from pathlib import Path
@@ -11,7 +11,7 @@ def get_config_dir() -> Path:
     return Path(__file__).parent.parent / "configs"
 
 
-def load_config(name: str = "neuron") -> dict:
+def load_config(name: str = "rcac") -> dict:
     """Load a YAML config file from the configs directory."""
     config_path = get_config_dir() / f"{name}.yaml"
     if not config_path.exists():
@@ -20,10 +20,10 @@ def load_config(name: str = "neuron") -> dict:
         return yaml.safe_load(f) or {}
 
 
-def get_neuron_config() -> dict:
-    """Load neuron.yaml and resolve user placeholders."""
-    cfg = load_config("neuron")
-    user = cfg["ssh"].get("user") or os.environ.get("NEURON_USER", "")
+def get_rcac_config() -> dict:
+    """Load rcac.yaml and resolve user placeholders."""
+    cfg = load_config("rcac")
+    user = cfg["ssh"].get("user") or os.environ.get("RCAC_USER", "")
     if user:
         for key, val in cfg.get("paths", {}).items():
             if isinstance(val, str):

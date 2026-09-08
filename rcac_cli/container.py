@@ -1,4 +1,4 @@
-"""Singularity container management for Neuron HPC."""
+"""Singularity container management for RCAC HPC."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from pathlib import Path
 
 import click
 
-from .config import get_neuron_config
+from .config import get_rcac_config
 
 
 def _ssh_cmd(cfg: dict) -> list[str]:
@@ -29,35 +29,35 @@ def _run_remote(cfg: dict, command: str) -> subprocess.CompletedProcess:
 
 @click.group()
 def cli() -> None:
-    """Manage Singularity containers on Neuron HPC."""
+    """Manage Singularity containers on RCAC HPC."""
 
 
 @cli.command()
 @click.argument("def_file", type=click.Path(exists=True))
 @click.option("--name", "-n", default=None, help="Output image name (default: <def_file>.sif)")
-@click.option("--remote-build", is_flag=True, help="Build on Neuron instead of locally")
+@click.option("--remote-build", is_flag=True, help="Build on RCAC instead of locally")
 def build(def_file: str, name: str | None, remote_build: bool) -> None:
     """Build a Singularity image from a definition file.
 
     For local builds, Singularity/Apptainer must be installed locally.
-    Use --remote-build to build on Neuron (requires interactive session).
+    Use --remote-build to build on RCAC (requires interactive session).
     """
-    cfg = get_neuron_config()
+    cfg = get_rcac_config()
     def_path = Path(def_file)
     image_name = name or def_path.stem + ".sif"
 
     if remote_build:
         if not cfg["ssh"]["user"]:
-            click.echo("Error: NEURON_USER not set.")
+            click.echo("Error: RCAC_USER not set.")
             sys.exit(1)
 
         user = cfg["ssh"]["user"]
-        remote_def = f"/scratch/{user}/.neuron-tools/{def_path.name}"
-        remote_sif = f"/scratch/{user}/.neuron-tools/{image_name}"
+        remote_def = f"/scratch/{user}/.rcac-tools/{def_path.name}"
+        remote_sif = f"/scratch/{user}/.rcac-tools/{image_name}"
 
         # Upload definition file
-        click.echo(f"Uploading {def_path.name} to Neuron...")
-        _run_remote(cfg, f"mkdir -p /scratch/{user}/.neuron-tools")
+        click.echo(f"Uploading {def_path.name} to RCAC...")
+        _run_remote(cfg, f"mkdir -p /scratch/{user}/.rcac-tools")
         ssh = cfg["ssh"]
         subprocess.run(
             ["scp", "-P", str(ssh["port"]), str(def_path),
@@ -65,7 +65,7 @@ def build(def_file: str, name: str | None, remote_build: bool) -> None:
             capture_output=True, text=True,
         )
 
-        click.echo(f"Building {image_name} on Neuron (this may take a while)...")
+        click.echo(f"Building {image_name} on RCAC (this may take a while)...")
         click.echo("Note: For large builds, consider using an interactive session:")
         click.echo(f"  srun --partition=amd_a100nv_8 --ntasks=1 --cpus-per-task=4 --time=02:00:00 --comment singularity --pty bash")
         click.echo(f"  singularity build {remote_sif} {remote_def}")
@@ -90,13 +90,13 @@ def build(def_file: str, name: str | None, remote_build: bool) -> None:
 
 @cli.command()
 @click.argument("image", type=click.Path(exists=True))
-@click.option("--dest", "-d", default=None, help="Remote path (default: /scratch/$USER/.neuron-tools/)")
+@click.option("--dest", "-d", default=None, help="Remote path (default: /scratch/$USER/.rcac-tools/)")
 def push(image: str, dest: str | None) -> None:
-    """Upload a Singularity image to Neuron."""
-    cfg = get_neuron_config()
+    """Upload a Singularity image to RCAC."""
+    cfg = get_rcac_config()
 
     if not cfg["ssh"]["user"]:
-        click.echo("Error: NEURON_USER not set.")
+        click.echo("Error: RCAC_USER not set.")
         sys.exit(1)
 
     user = cfg["ssh"]["user"]
@@ -105,9 +105,9 @@ def push(image: str, dest: str | None) -> None:
 
     # Use DM node for large file transfer (no CPU limit)
     host = ssh["dm_host"]
-    remote_dest = dest or f"/scratch/{user}/.neuron-tools/{image_path.name}"
+    remote_dest = dest or f"/scratch/{user}/.rcac-tools/{image_path.name}"
 
-    click.echo(f"Uploading {image_path.name} to Neuron via DM node...")
+    click.echo(f"Uploading {image_path.name} to RCAC via DM node...")
     click.echo(f"  Size: {image_path.stat().st_size / (1024**3):.1f} GB")
 
     result = subprocess.run(
@@ -128,14 +128,14 @@ def push(image: str, dest: str | None) -> None:
 @click.option("--bind", "-B", multiple=True, help="Bind mount paths (e.g., /scratch/$USER:/data)")
 @click.option("--nv", is_flag=True, default=True, help="Enable NVIDIA GPU support (default: on)")
 def run(image_path: str, command: tuple[str, ...], bind: tuple[str, ...], nv: bool) -> None:
-    """Run a command inside a Singularity container on Neuron.
+    """Run a command inside a Singularity container on RCAC.
 
     IMAGE_PATH is the remote path to the .sif file.
     """
-    cfg = get_neuron_config()
+    cfg = get_rcac_config()
 
     if not cfg["ssh"]["user"]:
-        click.echo("Error: NEURON_USER not set.")
+        click.echo("Error: RCAC_USER not set.")
         sys.exit(1)
 
     parts = ["singularity", "exec"]
@@ -156,11 +156,11 @@ def run(image_path: str, command: tuple[str, ...], bind: tuple[str, ...], nv: bo
 
 @cli.command("list")
 def list_images() -> None:
-    """List Singularity images on Neuron."""
-    cfg = get_neuron_config()
+    """List Singularity images on RCAC."""
+    cfg = get_rcac_config()
 
     if not cfg["ssh"]["user"]:
-        click.echo("Error: NEURON_USER not set.")
+        click.echo("Error: RCAC_USER not set.")
         sys.exit(1)
 
     user = cfg["ssh"]["user"]

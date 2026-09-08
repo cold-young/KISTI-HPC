@@ -8,7 +8,7 @@ import sys
 
 import click
 
-from .config import get_neuron_config
+from .config import get_rcac_config
 
 # Partition specs: (gpu_type, gpus_per_node, cores, relative_perf, cost_tier)
 PARTITION_INFO = {
@@ -140,10 +140,10 @@ def recommend_partition(
 @click.option("--prefer-cost", is_flag=True, help="Prefer cheaper partitions over performance")
 def select_partition(gpus: int, prefer_cost: bool) -> None:
     """Recommend the best partition based on current queue status."""
-    cfg = get_neuron_config()
+    cfg = get_rcac_config()
 
     if not cfg["ssh"]["user"]:
-        click.echo("Error: NEURON_USER not set.")
+        click.echo("Error: RCAC_USER not set.")
         sys.exit(1)
 
     click.echo(f"Analyzing partitions for {gpus} GPU(s)...\n")
@@ -167,4 +167,4 @@ def select_partition(gpus: int, prefer_cost: bool) -> None:
 
     best = ranked[0]
     click.echo(f"\nRecommended: --partition={best[0]}")
-    click.echo(f"  Use: neuron-exp launch experiment.yaml --partition {best[0]}")
+    click.echo(f"  Use: rcac-exp launch experiment.yaml --partition {best[0]}")

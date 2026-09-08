@@ -14,7 +14,7 @@ from pathlib import Path
 import click
 import yaml
 
-from .config import get_defaults, get_neuron_config
+from .config import get_defaults, get_rcac_config
 from .scheduler import (
     generate_job_array_script,
     generate_multi_gpu_script,
@@ -34,7 +34,7 @@ def _ssh_cmd(cfg: dict) -> list[str]:
 
 
 def _run_remote(cfg: dict, command: str) -> subprocess.CompletedProcess:
-    # Ensure commands run from scratch directory (KISTI sbatch requirement)
+    # Ensure commands run from scratch directory (RCAC sbatch requirement)
     user = cfg["ssh"]["user"]
     wrapped = f"cd /scratch/{user} && {command}"
     cmd = _ssh_cmd(cfg) + [wrapped]
@@ -94,7 +94,7 @@ def _write_config_file(config: dict, config_dir: Path, index: int) -> Path:
 
 @click.group()
 def cli() -> None:
-    """Manage experiments on Neuron HPC."""
+    """Manage experiments on RCAC HPC."""
 
 
 @cli.command()
@@ -105,10 +105,10 @@ def cli() -> None:
 @click.option("--gpus", "gpu_override", default=None, type=int, help="Override number of GPUs")
 def launch(experiment_file: str, dry_run: bool, max_jobs: int | None, partition: str | None, gpu_override: int | None) -> None:
     """Launch experiments from an experiment.yaml file."""
-    cfg = get_neuron_config()
+    cfg = get_rcac_config()
 
     if not cfg["ssh"]["user"]:
-        click.echo("Error: NEURON_USER not set.")
+        click.echo("Error: RCAC_USER not set.")
         sys.exit(1)
 
     with open(experiment_file) as f:
@@ -154,7 +154,7 @@ def launch(experiment_file: str, dry_run: bool, max_jobs: int | None, partition:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     exp_base = f"/scratch/{user}/projects/{project}"
     config_remote_dir = f"{exp_base}/configs/{timestamp}"
-    scripts_dir = Path(f"/tmp/neuron_exp_{timestamp}")
+    scripts_dir = Path(f"/tmp/rcac_exp_{timestamp}")
     scripts_dir.mkdir(parents=True, exist_ok=True)
 
     # Ensure remote directories
@@ -311,7 +311,7 @@ def launch(experiment_file: str, dry_run: bool, max_jobs: int | None, partition:
 
 
 def _upload_file(cfg: dict, local_path: str, remote_path: str) -> bool:
-    """Upload a file to Neuron via rsync. Returns True on success."""
+    """Upload a file to RCAC via rsync. Returns True on success."""
     ssh = cfg["ssh"]
     ssh_cmd = f"ssh -o ControlPath={ssh['control_path']} -p {ssh['port']}"
     cmd = [
@@ -330,10 +330,10 @@ def _upload_file(cfg: dict, local_path: str, remote_path: str) -> bool:
 @cli.command()
 def status() -> None:
     """Show status of all running experiments."""
-    cfg = get_neuron_config()
+    cfg = get_rcac_config()
 
     if not cfg["ssh"]["user"]:
-        click.echo("Error: NEURON_USER not set.")
+        click.echo("Error: RCAC_USER not set.")
         sys.exit(1)
 
     result = _run_remote(cfg, "squeue -u $USER -o '%.10i %.30j %.8T %.10M %.6D %R' --noheader")
@@ -357,10 +357,10 @@ def status() -> None:
 @click.argument("job_id")
 def logs(job_id: str) -> None:
     """Stream logs for a specific job."""
-    cfg = get_neuron_config()
+    cfg = get_rcac_config()
 
     if not cfg["ssh"]["user"]:
-        click.echo("Error: NEURON_USER not set.")
+        click.echo("Error: RCAC_USER not set.")
         sys.exit(1)
 
     user = cfg["ssh"]["user"]
@@ -389,10 +389,10 @@ def logs(job_id: str) -> None:
 @click.option("--jobs", "-j", default=None, help="Comma-separated job IDs to watch (default: all user jobs)")
 def watch(project: str, auto_pull: str | None, interval: int, jobs: str | None) -> None:
     """Watch running jobs and auto-pull results when they complete."""
-    cfg = get_neuron_config()
+    cfg = get_rcac_config()
 
     if not cfg["ssh"]["user"]:
-        click.echo("Error: NEURON_USER not set.")
+        click.echo("Error: RCAC_USER not set.")
         sys.exit(1)
 
     user = cfg["ssh"]["user"]
@@ -469,7 +469,7 @@ def watch(project: str, auto_pull: str | None, interval: int, jobs: str | None) 
 
 
 def _auto_pull_results(cfg: dict, project: str, local_dir: str) -> None:
-    """Pull experiment results from Neuron to local directory."""
+    """Pull experiment results from RCAC to local directory."""
     from pathlib import Path
     ssh = cfg["ssh"]
     user = ssh["user"]
@@ -496,10 +496,10 @@ def _auto_pull_results(cfg: dict, project: str, local_dir: str) -> None:
 @click.argument("job_id")
 def cancel(job_id: str) -> None:
     """Cancel a specific job or all jobs."""
-    cfg = get_neuron_config()
+    cfg = get_rcac_config()
 
     if not cfg["ssh"]["user"]:
-        click.echo("Error: NEURON_USER not set.")
+        click.echo("Error: RCAC_USER not set.")
         sys.exit(1)
 
     if job_id == "all":

@@ -32,7 +32,7 @@ sync:
     - "experiments/summary.csv"
 
 # 환경 기본 모듈
-# Neuron은 module load conda/pytorch_* 로 사전빌드 환경을 제공
+# RCAC은 module load conda/pytorch_* 로 사전빌드 환경을 제공
 # 사용자 conda 환경은 /apps/applications/Miniconda/25.11.1/bin/conda 사용
 environment:
   conda_path: "/apps/applications/Miniconda/25.11.1/bin/conda"

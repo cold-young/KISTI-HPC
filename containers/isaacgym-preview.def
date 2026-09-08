@@ -33,6 +33,6 @@ From: nvcr.io/nvidia/pytorch:23.10-py3
     python "$@"
 
 %labels
-    Author neuron-cli
-    Description Isaac Gym Preview 4 (DEPRECATED) for KISTI Neuron HPC
+    Author rcac-cli
+    Description Isaac Gym Preview 4 (DEPRECATED) for RCAC HPC
     Warning "Isaac Gym Preview is deprecated. Consider Genesis for new projects."

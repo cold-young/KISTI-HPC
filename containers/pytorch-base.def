@@ -19,5 +19,5 @@ From: nvcr.io/nvidia/pytorch:24.01-py3
     python "$@"
 
 %labels
-    Author neuron-cli
-    Description PyTorch base image for KISTI Neuron HPC
+    Author rcac-cli
+    Description PyTorch base image for RCAC HPC

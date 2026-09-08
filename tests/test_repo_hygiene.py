@@ -96,7 +96,7 @@ COMMIT_ORDER: Tuple[str, ...] = (
 #: The commit currently being authored.  Bump this as each commit lands; every
 #: row whose ``earliest_commit`` is <= this value becomes enforced.  Rows above
 #: it are inactive *by construction* -- filtered out, never skipped (AC-7.6).
-ACTIVE_COMMIT = "C0"
+ACTIVE_COMMIT = "C1"
 
 
 def commit_index(commit: str) -> int:
@@ -246,6 +246,29 @@ CONFIG_GLOBS: Tuple[str, ...] = (
     "examples/**/*.yml",
     "pyproject.toml",
 )
+
+#: The cluster-connection config, carved out of AC-1.6 exactly as the templates
+#: are.  ``configs/rcac.yaml`` carries ``ssh.login_host`` /``ssh.dm_host``, whose
+#: *values* are the KISTI hostnames themselves -- ``neuron.ksc.re.kr`` and
+#: ``neuron-dm.ksc.re.kr``.  There is no ``rcac`` spelling of a hostname: the
+#: value can only be *replaced* with the Gilbreth host, which is a semantic
+#: claim P3 bars from the C1 rename commit (and which C2 step 1 makes, together
+#: with the ``Host rcac`` -> ``Host gilbreth`` alias switch in C2 step 7).  The
+#: file therefore enters AC-1.6's scope at C2, not C1.
+CLUSTER_CONFIG_GLOBS: Tuple[str, ...] = (
+    "configs/rcac.yaml",
+    "configs/neuron.yaml",
+)
+
+#: :data:`CONFIG_GLOBS` minus :data:`CLUSTER_CONFIG_GLOBS`.  Enumerated rather
+#: than subtracted because ``configs/**/*.yaml`` would re-match the carve-out.
+NON_CLUSTER_CONFIG_GLOBS: Tuple[str, ...] = (
+    "configs/defaults.yaml",
+    "examples/**/*.yaml",
+    "examples/**/*.yml",
+    "pyproject.toml",
+)
+
 CONTAINER_GLOBS: Tuple[str, ...] = ("containers/**/*.def",)
 TEMPLATE_GLOBS: Tuple[str, ...] = (
     "templates/**/*.j2",
@@ -300,12 +323,26 @@ HYGIENE_SCOPE: Tuple[HygieneRow, ...] = (
     HygieneRow(
         ac_id="AC-1.6",
         earliest_commit="C1",
-        path_globs=SOURCE_GLOBS + CONFIG_GLOBS + CONTAINER_GLOBS,
+        path_globs=SOURCE_GLOBS + NON_CLUSTER_CONFIG_GLOBS + CONTAINER_GLOBS,
         allowlist=LEGACY_ALLOWLIST,
         kind="test",
         pattern=r"(?i)neuron|kisti",
         note="24 files at C0 across *.py/*.j2/*.yaml/*.yml/*.toml/*.def. "
-        "Templates are carved out into AC-1.6-templates below.",
+        "Templates are carved out into AC-1.6-templates and the cluster "
+        "config into AC-1.6-cluster-config below.",
+    ),
+    HygieneRow(
+        ac_id="AC-1.6-cluster-config",
+        earliest_commit="C2",
+        path_globs=CLUSTER_CONFIG_GLOBS,
+        allowlist=(),
+        kind="test",
+        pattern=r"(?i)neuron|kisti",
+        note="configs/rcac.yaml:3-4 hold ssh.login_host / ssh.dm_host, whose "
+        "values are neuron.ksc.re.kr and neuron-dm.ksc.re.kr. A hostname has "
+        "no rcac spelling -- it can only be REPLACED with the Gilbreth host, "
+        "which is semantic work P3 bars from the C1 rename commit, and which "
+        "C2 step 1 performs. Same shape as the AC-1.6-templates carve-out.",
     ),
     HygieneRow(
         ac_id="AC-1.6-templates",
@@ -893,6 +930,39 @@ def test_templates_row_is_deferred_to_c4():
     assert scan(ROOT, templates), (
         "the templates carve-out no longer matches anything; fold "
         "AC-1.6-templates back into AC-1.6"
+    )
+
+
+def test_cluster_config_row_is_deferred_to_c2():
+    """The second instance AC-0.6 caught, and the plan had not.
+
+    Section 4's C1 step list names ``configs/neuron.yaml`` only in the ``git mv``.
+    But AC-1.6 scans ``configs/**/*.yaml`` from C1, and the file's
+    ``login_host`` / ``dm_host`` *values* are the KISTI hostnames.  Renaming a
+    hostname is not a rename, it is a replacement, so C1 cannot satisfy AC-1.6
+    over this file and C2 step 1 must.
+    """
+    main = next(r for r in HYGIENE_SCOPE if r.ac_id == "AC-1.6")
+    cluster = next(r for r in HYGIENE_SCOPE if r.ac_id == "AC-1.6-cluster-config")
+
+    assert cluster.earliest_commit == "C2"
+    assert not glob_match("configs/rcac.yaml", main.path_globs), (
+        "AC-1.6 must not cover the cluster config; it carries "
+        "earliest_commit=C2"
+    )
+    # The carve-out must not silently widen: every other configs/ YAML stays
+    # in the main row, or the deferral has become a blanket exemption.
+    for rel in iter_files(ROOT):
+        if rel.startswith("configs/") and rel.endswith((".yaml", ".yml")):
+            assert glob_match(rel, main.path_globs) ^ glob_match(
+                rel, CLUSTER_CONFIG_GLOBS
+            ), f"{rel} is in both or neither of the AC-1.6 rows"
+
+    # Guard the premise: once C2 replaces the hostnames this carve-out is dead
+    # scope and must be folded back into AC-1.6.
+    assert scan(ROOT, cluster), (
+        "the cluster-config carve-out no longer matches anything; fold "
+        "AC-1.6-cluster-config back into AC-1.6"
     )
 
 

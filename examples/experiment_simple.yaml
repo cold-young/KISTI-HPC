@@ -1,5 +1,5 @@
 # Simple training experiment (no simulator)
-# Usage: neuron-exp launch examples/experiment_simple.yaml
+# Usage: rcac-exp launch examples/experiment_simple.yaml
 
 project: my_model
 description: "Model architecture search"

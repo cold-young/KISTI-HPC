@@ -11,7 +11,7 @@ from pathlib import Path
 
 import click
 
-from .config import get_neuron_config
+from .config import get_rcac_config
 
 
 def _ssh_cmd(cfg: dict) -> list[str]:
@@ -30,7 +30,7 @@ def _run_remote(cfg: dict, command: str) -> subprocess.CompletedProcess:
 
 
 def _fetch_experiment_results(cfg: dict, project: str) -> list[dict]:
-    """Fetch all experiment results from Neuron."""
+    """Fetch all experiment results from RCAC."""
     user = cfg["ssh"]["user"]
     exp_dir = f"/scratch/{user}/projects/{project}/experiments"
 
@@ -95,10 +95,10 @@ def cli() -> None:
 @click.option("--limit", "-l", default=20, help="Max results to show")
 def results(project: str, sort: str | None, limit: int) -> None:
     """Show all experiment results for a project."""
-    cfg = get_neuron_config()
+    cfg = get_rcac_config()
 
     if not cfg["ssh"]["user"]:
-        click.echo("Error: NEURON_USER not set.")
+        click.echo("Error: RCAC_USER not set.")
         sys.exit(1)
 
     data = _fetch_experiment_results(cfg, project)
@@ -135,10 +135,10 @@ def results(project: str, sort: str | None, limit: int) -> None:
 @click.argument("exp_ids", nargs=-1, required=True)
 def compare(project: str, exp_ids: tuple[str, ...]) -> None:
     """Compare specific experiments side by side."""
-    cfg = get_neuron_config()
+    cfg = get_rcac_config()
 
     if not cfg["ssh"]["user"]:
-        click.echo("Error: NEURON_USER not set.")
+        click.echo("Error: RCAC_USER not set.")
         sys.exit(1)
 
     data = _fetch_experiment_results(cfg, project)
@@ -177,10 +177,10 @@ def compare(project: str, exp_ids: tuple[str, ...]) -> None:
 @click.option("--top", "-t", default=5, help="Number of top results to show")
 def best(project: str, metric: str, top: int) -> None:
     """Show top-performing experiments."""
-    cfg = get_neuron_config()
+    cfg = get_rcac_config()
 
     if not cfg["ssh"]["user"]:
-        click.echo("Error: NEURON_USER not set.")
+        click.echo("Error: RCAC_USER not set.")
         sys.exit(1)
 
     data = _fetch_experiment_results(cfg, project)
@@ -216,11 +216,11 @@ def best(project: str, metric: str, top: int) -> None:
 @click.argument("project")
 @click.option("--exp-id", default=None, help="Specific experiment ID")
 def sync_wandb(project: str, exp_id: str | None) -> None:
-    """Download W&B offline runs from Neuron and sync locally."""
-    cfg = get_neuron_config()
+    """Download W&B offline runs from RCAC and sync locally."""
+    cfg = get_rcac_config()
 
     if not cfg["ssh"]["user"]:
-        click.echo("Error: NEURON_USER not set.")
+        click.echo("Error: RCAC_USER not set.")
         sys.exit(1)
 
     user = cfg["ssh"]["user"]
@@ -234,7 +234,7 @@ def sync_wandb(project: str, exp_id: str | None) -> None:
     local_wandb = Path(f"./wandb_sync/{project}")
     local_wandb.mkdir(parents=True, exist_ok=True)
 
-    click.echo(f"Downloading W&B runs from Neuron...")
+    click.echo(f"Downloading W&B runs from RCAC...")
     cmd = [
         "rsync", "-avz", "--progress",
         f"{user}@{host}:{remote_wandb}/",

@@ -1,4 +1,4 @@
-"""Code synchronization between local and Neuron HPC via rsync."""
+"""Code synchronization between local and RCAC HPC via rsync."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from pathlib import Path
 
 import click
 
-from .config import get_defaults, get_neuron_config
+from .config import get_defaults, get_rcac_config
 
 
 def _build_exclude_args(defaults: dict) -> list[str]:
@@ -61,7 +61,7 @@ def _run_rsync(args: list[str], cfg: dict | None = None, dry_run: bool = False) 
 
 @click.group()
 def cli() -> None:
-    """Sync code between local machine and Neuron HPC."""
+    """Sync code between local machine and RCAC HPC."""
 
 
 @cli.command()
@@ -70,12 +70,12 @@ def cli() -> None:
 @click.option("--dry-run", is_flag=True, help="Show what would be transferred")
 @click.option("--delete", is_flag=True, help="Delete remote files not present locally")
 def push(local_path: str, project: str | None, dry_run: bool, delete: bool) -> None:
-    """Push local code to Neuron (local -> remote)."""
-    cfg = get_neuron_config()
+    """Push local code to RCAC (local -> remote)."""
+    cfg = get_rcac_config()
     defaults = get_defaults()
 
     if not cfg["ssh"]["user"]:
-        click.echo("Error: NEURON_USER not set.")
+        click.echo("Error: RCAC_USER not set.")
         sys.exit(1)
 
     local = Path(local_path).resolve()
@@ -103,12 +103,12 @@ def push(local_path: str, project: str | None, dry_run: bool, delete: bool) -> N
 @click.option("--all-files", is_flag=True, help="Pull all files (not just results)")
 @click.option("--dry-run", is_flag=True, help="Show what would be transferred")
 def pull(local_path: str, project: str | None, all_files: bool, dry_run: bool) -> None:
-    """Pull results from Neuron (remote -> local)."""
-    cfg = get_neuron_config()
+    """Pull results from RCAC (remote -> local)."""
+    cfg = get_rcac_config()
     defaults = get_defaults()
 
     if not cfg["ssh"]["user"]:
-        click.echo("Error: NEURON_USER not set.")
+        click.echo("Error: RCAC_USER not set.")
         sys.exit(1)
 
     local = Path(local_path).resolve()
@@ -137,15 +137,15 @@ def pull(local_path: str, project: str | None, all_files: bool, dry_run: bool) -
 @click.option("--project", "-p", default=None, help="Remote project name")
 @click.option("--interval", "-i", default=2.0, help="Check interval in seconds")
 def watch(local_path: str, project: str | None, interval: float) -> None:
-    """Watch local directory and auto-push changes to Neuron."""
+    """Watch local directory and auto-push changes to RCAC."""
     from watchdog.events import FileSystemEventHandler
     from watchdog.observers import Observer
 
-    cfg = get_neuron_config()
+    cfg = get_rcac_config()
     defaults = get_defaults()
 
     if not cfg["ssh"]["user"]:
-        click.echo("Error: NEURON_USER not set.")
+        click.echo("Error: RCAC_USER not set.")
         sys.exit(1)
 
     local = Path(local_path).resolve()
@@ -208,11 +208,11 @@ def watch(local_path: str, project: str | None, interval: float) -> None:
 @click.option("--via", type=click.Choice(["dm", "login"]), default="dm", help="Transfer via DM or login node")
 @click.option("--dry-run", is_flag=True)
 def push_data(local_data_path: str, via: str, dry_run: bool) -> None:
-    """Push large data to Neuron via DM node (no CPU limit)."""
-    cfg = get_neuron_config()
+    """Push large data to RCAC via DM node (no CPU limit)."""
+    cfg = get_rcac_config()
 
     if not cfg["ssh"]["user"]:
-        click.echo("Error: NEURON_USER not set.")
+        click.echo("Error: RCAC_USER not set.")
         sys.exit(1)
 
     user = cfg["ssh"]["user"]
