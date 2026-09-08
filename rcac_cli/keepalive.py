@@ -51,7 +51,7 @@ KEEPALIVE_PATTERNS = [
     ("projects", "-name '*.pth' -o -name '*.pt' -o -name '*.ckpt'"),
     # Configs
     ("projects", "-name '*.yaml' -o -name '*.yml' -o -name '*.json'"),
-    # Singularity images
+    # Apptainer images
     ("", "-name '*.sif'"),
     # Source code
     ("projects", "-name '*.py'"),

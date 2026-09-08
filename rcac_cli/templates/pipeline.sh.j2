@@ -24,18 +24,13 @@ export WANDB_MODE=offline
 # Wraps `python {script} {args}` according to environment.type declared in the
 # experiment.yaml. Without this branch, the host system python is used and
 # every K-UBM import fails immediately. (BUG-K1 fix.)
-{% if env_type == "singularity" %}
-# Singularity: --nv binds host NVIDIA driver, --bind makes scratch visible.
-singularity exec --nv \
-    --bind {{ scratch_root }}:{{ scratch_root }} \
+{% if env_type == "apptainer" %}
+apptainer exec --nv \
     {{ env_container }} \
     python {{ script }} {{ args }}
 {% elif env_type == "conda" %}
-# User conda env at {{ scratch_root }}/.conda_envs/{{ conda_env }} (we keep
-# packages off /home01 due to KISTI's tight quota; see dev_status.md).
-source /apps/applications/Miniconda/25.11.1/etc/profile.d/conda.sh
-export CONDA_ENVS_PATH={{ scratch_root }}/.conda_envs:$CONDA_ENVS_PATH
-conda activate {{ conda_env }}
+module load use.own
+module load conda-env/{{ conda_env }}
 python {{ script }} {{ args }}
 {% else %}
 # Fallback: rely on PATH/modules already loaded above.

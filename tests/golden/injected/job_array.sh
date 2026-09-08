@@ -16,9 +16,6 @@
 # === Environment Setup ===
 
 
-export PATH=$HOME/.conda/envs/golden_env/bin:$PATH
-
-
 # === Working Directory ===
 cd /scratch/gilbreth/golden_user/projects/golden_project
 

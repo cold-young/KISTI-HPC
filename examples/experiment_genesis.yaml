@@ -19,7 +19,7 @@ slurm:
   # configs/rcac.yaml.
 
 environment:
-  type: singularity
+  type: apptainer
   name: genesis_env
   container: /scratch/gilbreth/$USER/.rcac-tools/genesis-sim.sif
   # `modules:` deliberately absent -- see examples/experiment_simple.yaml.

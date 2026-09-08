@@ -96,7 +96,7 @@ COMMIT_ORDER: Tuple[str, ...] = (
 #: The commit currently being authored.  Bump this as each commit lands; every
 #: row whose ``earliest_commit`` is <= this value becomes enforced.  Rows above
 #: it are inactive *by construction* -- filtered out, never skipped (AC-7.6).
-ACTIVE_COMMIT = "C3c"
+ACTIVE_COMMIT = "C4"
 
 
 def commit_index(commit: str) -> int:
@@ -212,14 +212,36 @@ COMMIT_CHANGE_LISTS: dict[str, set[str]] = {
         "tests/test_repo_hygiene.py",
     },
     # C4 -- environment and container runtime.  This is where
-    # `templates/pipeline.sh.j2:42` ("KISTI's tight quota") is finally deleted.
+    # `templates/pipeline.sh.j2:42` ("KISTI's tight quota") is finally deleted,
+    # which is what lets AC-1.6-templates fold back into AC-1.6.
+    #
+    # Wider than the plan's six paths, and the extra five are not incidental:
+    # AC-5.4 bans the previous runtime's name case-insensitively across the
+    # package, `examples/**` and `containers/**`, and the name had reached four
+    # modules the plan's step list does not mention (`keepalive.py` in a
+    # comment, `simulator.py` in a compatibility note, a `click.echo` and the
+    # `environment.type` it generates) plus one test parameter id. A change
+    # list that named only the plan's six would have left the row failing with
+    # no commit responsible for the difference -- exactly the drift AC-0.6
+    # exists to surface. `examples/experiment_simple.yaml` joins them because
+    # deleting the templates' Miniconda branch changes what `environment.name`
+    # has to contain, and the example is where that contract is documented.
     "C4": {
         "{pkg}/env.py",
         "{pkg}/container.py",
         "{pkg}/experiment.py",
+        "{pkg}/keepalive.py",
+        "{pkg}/simulator.py",
+        "{pkg}/_legacy.py",
         "{pkg}/templates/**",
         "examples/experiment_genesis.yaml",
+        "examples/experiment_simple.yaml",
         "containers/*.def",
+        "tests/test_env.py",
+        "tests/test_container.py",
+        "tests/test_scheduler.py",
+        "tests/test_repo_hygiene.py",
+        "tests/golden/**",
     },
     # C5 -- runtime discovery and partition selection.
     "C5": {
@@ -336,29 +358,21 @@ HYGIENE_SCOPE: Tuple[HygieneRow, ...] = (
     HygieneRow(
         ac_id="AC-1.6",
         earliest_commit="C1",
-        path_globs=SOURCE_GLOBS + CONFIG_GLOBS + CONTAINER_GLOBS,
+        path_globs=SOURCE_GLOBS + CONFIG_GLOBS + CONTAINER_GLOBS + TEMPLATE_GLOBS,
         allowlist=LEGACY_ALLOWLIST,
         kind="test",
         pattern=r"(?i)neuron|kisti",
-        note="24 files at C0 across *.py/*.j2/*.yaml/*.yml/*.toml/*.def. "
-        "configs/rcac.yaml carried its own carve-out through C1 because its "
+        note="24 files at C0 across *.py/*.j2/*.yaml/*.yml/*.toml/*.def. Two "
+        "carve-outs were folded back in as their blocking work landed. "
+        "configs/rcac.yaml was deferred through C1 because its "
         "login_host/transfer-host VALUES were the old cluster's hostnames and "
         "a hostname has no rcac spelling -- it can only be replaced, which is "
-        "semantic work P3 bars from a rename commit. C2 step 1 replaced them, "
-        "so the carve-out is folded back in here and only the templates "
-        "(AC-1.6-templates, C4) remain deferred.",
-    ),
-    HygieneRow(
-        ac_id="AC-1.6-templates",
-        earliest_commit="C4",
-        path_globs=TEMPLATE_GLOBS,
-        allowlist=LEGACY_ALLOWLIST,
-        kind="test",
-        pattern=r"(?i)neuron|kisti",
-        note="templates/pipeline.sh.j2:42 says \"KISTI's tight quota\". There is "
-        "no rcac equivalent of that sentence, so the line can only be DELETED, "
-        "which is semantic work P3 bars from the C1 rename commit. The "
-        "templates enter package scope at C2 and are cleaned at C4.",
+        "semantic work P3 bars from a rename commit; C2 step 1 replaced them. "
+        "The templates were deferred through C3c for the same reason in the "
+        "other direction: pipeline.sh.j2 said \"KISTI's tight quota\", a "
+        "sentence with no rcac equivalent, so it could only be DELETED -- "
+        "which C4 step 3 did, along with the Miniconda source line it was "
+        "commenting on. Both are enforced here now; nothing is deferred.",
     ),
     HygieneRow(
         ac_id="AC-1.7",
@@ -926,35 +940,32 @@ def test_meta_scope_is_derived_from_change_lists(row: HygieneRow):
     )
 
 
-def test_templates_row_is_deferred_to_c4():
-    """The concrete instance AC-0.6 exists to have caught.
+def test_templates_are_covered_by_the_main_branding_row():
+    """The carve-out AC-0.6 forced, now folded back in (C4 step 3).
 
-    ``pipeline.sh.j2:42`` reads "KISTI's tight quota".  There is no ``rcac``
-    equivalent sentence, so C1 cannot rename it -- only C4 can delete it.  The
-    main AC-1.6 row must therefore not cover ``*.j2``.
+    ``AC-1.6-templates`` existed for exactly one line: ``pipeline.sh.j2`` said
+    "KISTI's tight quota", a sentence with no ``rcac`` equivalent, so C1 could
+    not rename it and only C4 could delete it.  C4 deleted it, so the carve-out
+    was folded back into ``AC-1.6`` rather than left as dead scope -- the same
+    move C2 made for ``configs/rcac.yaml``.  What replaces the old guard is the
+    two halves of "folded back": the row is gone, and ``AC-1.6`` really does
+    reach the templates.
     """
-    main = next(r for r in HYGIENE_SCOPE if r.ac_id == "AC-1.6")
-    templates = next(r for r in HYGIENE_SCOPE if r.ac_id == "AC-1.6-templates")
-
-    assert templates.earliest_commit == "C4"
-    assert not any(g.endswith("*.j2") for g in main.path_globs), (
-        "AC-1.6 must not cover *.j2; templates carry earliest_commit=C4"
+    assert not [r for r in HYGIENE_SCOPE if r.ac_id == "AC-1.6-templates"], (
+        "AC-1.6-templates is back; it was folded into AC-1.6 at C4"
     )
 
+    main = next(r for r in HYGIENE_SCOPE if r.ac_id == "AC-1.6")
+    assert any(g.endswith("*.j2") for g in main.path_globs), (
+        "AC-1.6 no longer covers *.j2, so the fold-back left the templates "
+        "unscanned by any row"
+    )
     pipeline = [
-        rel
-        for rel in resolve_scope(ROOT, templates)
-        if rel.endswith("pipeline.sh.j2")
+        rel for rel in resolve_scope(ROOT, main) if rel.endswith("pipeline.sh.j2")
     ]
     assert pipeline, (
-        "pipeline.sh.j2 did not resolve into the templates row; the glob has "
-        f"drifted (globs={templates.path_globs}, PKG={PKG!r})"
-    )
-    # Guard the premise: if the KISTI sentence is gone, this carve-out should
-    # be collapsed back into AC-1.6 rather than left as dead scope.
-    assert scan(ROOT, templates), (
-        "the templates carve-out no longer matches anything; fold "
-        "AC-1.6-templates back into AC-1.6"
+        "pipeline.sh.j2 did not resolve into AC-1.6; the glob has drifted "
+        f"(globs={main.path_globs}, PKG={PKG!r})"
     )
 
 

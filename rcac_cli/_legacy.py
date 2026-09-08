@@ -12,9 +12,12 @@ Consumers:
 
 * :func:`rcac_cli.connect._remove_ssh_config` -- must match a block written by
   the pre-port CLI in a returning user's ``~/.ssh/config`` (AC-2.10, R17).
-* ``rcac_cli.experiment`` / ``rcac_cli.container`` -- must recognise a legacy
+* :func:`rcac_cli.experiment.resolve_env_type` -- must recognise a legacy
   ``environment.type`` in an existing experiment YAML and fail with a message
-  naming the replacement rather than a ``KeyError`` (AC-5.9, wired in C4).
+  naming the replacement rather than silently selecting the template's
+  host-python fallback branch (AC-5.9, wired in C4).  ``container.py`` was
+  named here as a second consumer while C4 was unwritten; it turned out to
+  need none -- it never reads a manifest -- so it is not listed.
 
 **Deletion trigger.** Delete this module, its allowlist entry in
 ``tests/test_repo_hygiene.py``, and both consumers once no user is expected to

@@ -5,6 +5,7 @@ from __future__ import annotations
 import itertools
 import json
 import random
+import re
 import subprocess
 import sys
 import time
@@ -14,6 +15,12 @@ from pathlib import Path
 import click
 import yaml
 
+from ._legacy import LEGACY_ENV_TYPES
+
+#: The suffix `conda-env-mod` appends to a module it creates, e.g. the
+#: `-py3.12` in `conda-env/train_env-py3.12`. Used only to notice a manifest
+#: that names the environment without it; see the warning in `launch`.
+PY_SUFFIX_RE = re.compile(r"-py\d+\.\d+")
 from .config import (
     get_defaults,
     get_rcac_config,
@@ -51,6 +58,37 @@ LEGACY_SLURM_KEYS: dict[str, str] = {
         "and slurm.qos for the QOS (-q)."
     ),
 }
+
+
+def resolve_env_type(env_type: object) -> str | None:
+    """AC-5.9 -- accept Gilbreth's runtime, reject the previous cluster's.
+
+    A pre-port manifest naming the old container runtime is a *hard error*
+    naming its replacement, not a silent alias.  Aliasing would work exactly
+    once and leave the file wrong for the next reader; and unlike the
+    ``slurm:`` keys above -- which are ignorable, so they warn -- an
+    unrecognised ``environment.type`` selects the template's fallback branch
+    and runs the job against the host system python, which fails deep inside
+    the user's imports minutes after submission.
+
+    The legacy spelling itself is not written here: it comes from
+    :data:`rcac_cli._legacy.LEGACY_ENV_TYPES`, the one module allowlisted to
+    hold it (AC-0.8), because banning the literal everywhere while also
+    requiring its detection is otherwise a contradiction.
+    """
+    if env_type is None:
+        return None
+    replacement = LEGACY_ENV_TYPES.get(str(env_type).strip().lower())
+    if replacement:
+        raise click.ClickException(
+            f"environment.type: {env_type} names the container runtime of the "
+            f"cluster this tool was ported from. Gilbreth runs {replacement} "
+            f"({replacement} is system-installed and needs no `module load`), "
+            f"and the generated job scripts only have a branch for it. Change "
+            f"the manifest to `type: {replacement}`; the image path in "
+            f"`environment.container` does not change."
+        )
+    return str(env_type)
 
 
 def _normalise_slurm(source: dict | None, origin: str, warnings: list) -> dict:
@@ -256,14 +294,32 @@ def launch(
     known_partitions = None
 
     env_cfg = exp.get("environment", {})
+    # `name` is the environment as its MODULE is named on Gilbreth: the
+    # generated script loads `use.own` then `conda-env/<name>`, which is what
+    # `rcac-env activate` prints. If conda-env-mod gave it a `-pyX.Y` suffix,
+    # that suffix is part of the name and belongs here.
     conda_env = env_cfg.get("name", "base")
-    # New: surface environment.type ("conda" | "singularity" | None) and
-    # environment.container (for singularity) to the SLURM template so the
+    # Surface environment.type ("conda" | "apptainer" | None) and
+    # environment.container (for apptainer) to the SLURM template so the
     # generated job actually runs python inside the requested env. Without
     # this, the template falls back to the host system python and ImportErrors
-    # immediately. (Tracked as BUG-K1 in results/dev_doc/dev_status.md.)
-    env_type = env_cfg.get("type")
+    # immediately. (BUG-K1.)
+    env_type = resolve_env_type(env_cfg.get("type"))
     env_container = env_cfg.get("container")
+    # `rcac-env setup --name X --py 3.12` creates the module `conda-env/X-py3.12`.
+    # A manifest naming a bare `X` therefore renders `module load conda-env/X`,
+    # and the job dies at line one on the compute node minutes after submission.
+    # This is the one place that knows both halves, so warn here rather than let
+    # Lmod discover it remotely. A warning, not an error: an environment built by
+    # hand, or by an older conda-env-mod, legitimately carries no suffix.
+    if env_type == "conda" and not PY_SUFFIX_RE.search(str(conda_env)):
+        manifest_warnings.append(
+            f"{experiment_file}: environment.name is {conda_env!r}, which carries "
+            "no -pyX.Y suffix. This renders `module load "
+            f"conda-env/{conda_env}`, which fails on the compute node unless a "
+            "module of exactly that name exists. `rcac-env activate <env>` "
+            "prints the name to use; `module avail conda-env` lists them."
+        )
     modules = env_cfg.get("modules", defaults.get("environment", {}).get("default_modules", []))
 
     base_params = exp.get("base_params", {})

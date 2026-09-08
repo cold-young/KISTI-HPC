@@ -23,7 +23,13 @@ slurm:
 
 environment:
   type: conda
-  name: train_env
+  # `name` is the environment as its MODULE is named on Gilbreth. The generated
+  # job script runs `module load use.own` then `module load conda-env/<name>`,
+  # which is exactly what `rcac-env activate <env>` prints -- so if
+  # conda-env-mod gave the environment a `-pyX.Y` suffix, that suffix is part
+  # of the name and belongs here.
+  # This is the shape `rcac-env setup --name train_env --py 3.12` produces.
+  name: train_env-py3.12
   # `modules:` is deliberately absent. Do not list a module name that
   # `module avail` / `module spider` has not printed on Gilbreth -- a
   # `module load` of a non-existent module fails the job at line one.

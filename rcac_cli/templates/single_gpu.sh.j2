@@ -17,15 +17,13 @@ export CONFIG_PATH="{{ config_path }}"
 export WANDB_MODE=offline
 
 # === Python invocation === (BUG-K1 fix: respect environment.type)
-{% if env_type == "singularity" %}
-singularity exec --nv \
-    --bind {{ scratch_root }}:{{ scratch_root }} \
+{% if env_type == "apptainer" %}
+apptainer exec --nv \
     {{ env_container }} \
     python {{ script }} {{ args }}
 {% elif env_type == "conda" %}
-source /apps/applications/Miniconda/25.11.1/etc/profile.d/conda.sh
-export CONDA_ENVS_PATH={{ scratch_root }}/.conda_envs:$CONDA_ENVS_PATH
-conda activate {{ conda_env }}
+module load use.own
+module load conda-env/{{ conda_env }}
 python {{ script }} {{ args }}
 {% else %}
 python {{ script }} {{ args }}

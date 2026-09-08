@@ -411,7 +411,7 @@ def test_a_missing_variable_raises_undefined_error(missing: str) -> None:
 
 @pytest.mark.parametrize(
     "env_type,missing",
-    [("conda", "conda_env"), ("singularity", "env_container")],
+    [("conda", "conda_env"), ("apptainer", "env_container")],
 )
 def test_branch_only_variables_also_raise_when_their_branch_is_taken(
     env_type: str, missing: str
@@ -605,6 +605,38 @@ def run_launch(*args, env=None):
         ["launch", str(SIMPLE_EXAMPLE), "--dry-run", *args],
         env={**CLI_ENV, **(env or {})},
     )
+
+
+def test_shipped_example_names_the_module_rcac_env_setup_actually_creates() -> None:
+    """The example and ``rcac-env setup`` must agree, or the example is a trap.
+
+    ``rcac-env setup --name X --py 3.12`` creates ``conda-env/X-py3.12``.  An
+    example naming a bare ``X`` renders ``module load conda-env/X``, which a
+    user who followed our own setup instructions cannot load -- and Lmod only
+    says so on the compute node, minutes after submission.
+    """
+    result = run_launch("-n", "1")
+    assert result.exit_code == 0, result.output
+    assert "module load conda-env/train_env-py3.12" in result.output
+    assert "environment.name is" not in result.output
+
+
+def test_environment_name_without_a_py_suffix_warns_before_submission(tmp_path) -> None:
+    """Warn locally rather than let Lmod fail the job remotely.
+
+    A warning and not an error: an environment built by hand, or by an older
+    ``conda-env-mod``, legitimately carries no suffix.
+    """
+    manifest = tmp_path / "nosuffix.yaml"
+    manifest.write_text(
+        SIMPLE_EXAMPLE.read_text().replace("train_env-py3.12", "train_env")
+    )
+    result = CliRunner().invoke(
+        exp_cli, ["launch", str(manifest), "--dry-run", "-n", "1"], env=CLI_ENV
+    )
+    assert result.exit_code == 0, result.output
+    assert "environment.name is 'train_env'" in result.output
+    assert "rcac-env activate" in result.output
 
 
 def test_dry_run_prints_the_sbatch_command_and_the_whole_script() -> None:

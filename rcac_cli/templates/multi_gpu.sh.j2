@@ -19,17 +19,15 @@ export MASTER_ADDR=$(hostname)
 export MASTER_PORT=29500
 
 # === Distributed launch === (BUG-K1 fix: respect environment.type)
-{% if env_type == "singularity" %}
-singularity exec --nv \
-    --bind {{ scratch_root }}:{{ scratch_root }} \
+{% if env_type == "apptainer" %}
+apptainer exec --nv \
     {{ env_container }} \
     torchrun --nproc_per_node={{ gpus_per_node }} --nnodes={{ nodes }} \
         --master_addr=${MASTER_ADDR} --master_port=${MASTER_PORT} \
         {{ script }} {{ args }}
 {% elif env_type == "conda" %}
-source /apps/applications/Miniconda/25.11.1/etc/profile.d/conda.sh
-export CONDA_ENVS_PATH={{ scratch_root }}/.conda_envs:$CONDA_ENVS_PATH
-conda activate {{ conda_env }}
+module load use.own
+module load conda-env/{{ conda_env }}
 torchrun --nproc_per_node={{ gpus_per_node }} --nnodes={{ nodes }} \
     --master_addr=${MASTER_ADDR} --master_port=${MASTER_PORT} \
     {{ script }} {{ args }}

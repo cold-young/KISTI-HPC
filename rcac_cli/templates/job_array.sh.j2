@@ -8,9 +8,6 @@
 {% for mod in modules %}
 module load {{ mod }}
 {% endfor %}
-{% if conda_env and conda_env != 'base' %}
-export PATH=$HOME/.conda/envs/{{ conda_env }}/bin:$PATH
-{% endif %}
 
 # === Working Directory ===
 cd {{ scratch_root }}/projects/{{ project }}
