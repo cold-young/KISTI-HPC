@@ -24,13 +24,16 @@ language most reviewers of this repo do not read.
 from __future__ import annotations
 
 import re
+import shlex
 import tomllib
 from pathlib import Path
 
 import pytest
+import yaml
 from click.testing import CliRunner
 
 from rcac_cli.experiment import cli as exp_cli
+from rcac_cli.simulator import cli as sim_cli
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -302,3 +305,132 @@ def test_shipped_example_parses_through_dry_run(example: Path) -> None:
     assert result.exit_code == 0, f"{example.name}:\n{result.output}"
     assert "#SBATCH -A testqueue" in result.output, result.output
     assert "#SBATCH -p " in result.output, result.output
+
+
+# --------------------------------------------------------------------------
+# The README's own worked examples
+# --------------------------------------------------------------------------
+
+#: The two command groups of a scenario block that run offline.  The container
+#: lines of Scenario B need a cluster and an Apptainer runtime; these three do
+#: not, and they are the ones that have to *compose*.
+SCENARIO_CLIS = {"rcac-sim": sim_cli, "rcac-exp": exp_cli}
+
+#: The two commands that anchor Scenario B.  The block is located by content
+#: rather than by heading text, so one parser reads the English and the Korean
+#: file; and it takes BOTH anchors, because section 5's command reference lists
+#: `rcac-sim init-pipeline` and `rcac-exp launch` too -- in separate blocks,
+#: one per program.  Needing both in one block is what distinguishes a worked
+#: example, where the commands hand each other input, from a synopsis.
+SCENARIO_B_ANCHORS = ("rcac-sim init-pipeline", "rcac-exp launch")
+
+
+def _fenced_code_blocks(lines: list[str]) -> list[list[str]]:
+    """Every ```-fenced block of *lines*, as lists of body lines."""
+    blocks: list[list[str]] = []
+    current: list[str] | None = None
+    for line in lines:
+        if line.startswith("```"):
+            if current is None:
+                current = []
+            else:
+                blocks.append(current)
+                current = None
+            continue
+        if current is not None:
+            current.append(line)
+    assert current is None, "unbalanced ``` fence"
+    return blocks
+
+
+def _scenario_b_commands(name: str) -> list[list[str]]:
+    """Scenario B's runnable commands, read out of *name* verbatim.
+
+    Read from the README rather than restated here.  A test that carried its
+    own copy of the commands would keep passing while the documented ones
+    rotted, which is the precise failure this exists to refuse: Scenario B was
+    published as a worked example while its second command exited 2.
+    """
+    blocks = [
+        b
+        for b in _fenced_code_blocks(_lines(name))
+        if all(
+            any(line.strip().startswith(anchor) for line in b)
+            for anchor in SCENARIO_B_ANCHORS
+        )
+    ]
+    assert len(blocks) == 1, (
+        f"{name}: expected exactly one code block containing all of "
+        f"{list(SCENARIO_B_ANCHORS)}, found {len(blocks)}"
+    )
+    commands = []
+    for line in blocks[0]:
+        text = line.split("#", 1)[0].strip()
+        if not text:
+            continue
+        argv = shlex.split(text)
+        if argv[0] in SCENARIO_CLIS:
+            commands.append(argv)
+    return commands
+
+
+@pytest.mark.parametrize("name", READMES)
+def test_readme_scenario_b_runs_end_to_end(
+    name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Scenario B's commands compose, in the order the README prints them.
+
+    ``rcac-sim init-pipeline`` ends by printing ``To launch: rcac-exp launch
+    <file>``, so these two are not merely adjacent in a list -- one hands the
+    other its input.  For a while the handoff was broken: the generated
+    manifest carried ``{generate_data.output_path}`` and ``{train.best_model}``,
+    a cross-stage syntax that was never implemented and cannot be, because the
+    stages are separate ``sbatch`` submissions and ``launch`` returns before
+    stage one runs.  ``launch`` rejected them with ``unknown placeholder`` and
+    exited 2, so the README documented a two-step recipe whose second step
+    failed.
+
+    Running the README's own text is what keeps that from recurring silently:
+    editing either command, or either program, without editing the other now
+    fails here rather than in a user's terminal.
+    """
+    commands = _scenario_b_commands(name)
+    assert len(commands) >= 2, f"{name}: Scenario B has fewer than two runnable commands"
+    assert any(argv[0] == "rcac-exp" for argv in commands), (
+        f"{name}: Scenario B never reaches `rcac-exp`, so nothing is composed"
+    )
+
+    # `-o experiment.yaml` is a relative path, so the scenario runs in its own
+    # directory: the file the first command writes is the file the second reads.
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    for argv in commands:
+        result = runner.invoke(SCENARIO_CLIS[argv[0]], argv[1:], env=CLI_ENV)
+        assert result.exit_code == 0, (
+            f"{name}: `{' '.join(argv)}` exited {result.exit_code}, not 0.\n"
+            f"{result.output}"
+            + (f"\n{result.exception!r}" if result.exception else "")
+        )
+
+    # The manifest the first command wrote must use only placeholders the
+    # second can resolve.  A dotted name is the shape of the syntax that was
+    # never implemented, and it is worth naming explicitly: without this, a
+    # reintroduction would fail above with a message about one missing key
+    # rather than about the class.
+    manifest = tmp_path / "experiment.yaml"
+    assert manifest.is_file(), f"{name}: Scenario B wrote no experiment.yaml"
+    stages = yaml.safe_load(manifest.read_text())["pipeline"]
+    dotted = [
+        (stage["name"], token)
+        for stage in stages
+        for token in re.findall(r"\{([^{}]+)\}", stage.get("args", ""))
+        if "." in token
+    ]
+    assert not dotted, (
+        f"{name}: the generated manifest uses cross-stage placeholders "
+        f"{dotted}. They are unimplemented and unimplementable: the stages "
+        "are separate sbatch submissions chained by --dependency, so "
+        "`launch` has returned before the earlier stage runs and has nothing "
+        "to read the value out of. Derive the path on both sides instead "
+        "({config_dir}, {config_path}, base_params keys)."
+    )

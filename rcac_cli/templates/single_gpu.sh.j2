@@ -16,7 +16,7 @@ export EXPERIMENT_ID="{{ exp_id }}"
 export CONFIG_PATH="{{ config_path }}"
 export WANDB_MODE=offline
 
-# === Python invocation === (BUG-K1 fix: respect environment.type)
+# === Python invocation === (honours environment.type)
 {% if env_type == "apptainer" %}
 apptainer exec --nv \
     {{ env_container }} \

@@ -33,6 +33,8 @@ Gilbreth, and a default pointing at a non-existent binary fails later and less
 legibly than having no default at all.
 """
 
+from __future__ import annotations
+
 import re
 import shlex
 import subprocess

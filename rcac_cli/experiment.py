@@ -322,7 +322,7 @@ def launch(
     # environment.container (for apptainer) to the SLURM template so the
     # generated job actually runs python inside the requested env. Without
     # this, the template falls back to the host system python and ImportErrors
-    # immediately. (BUG-K1.)
+    # immediately.
     env_type = resolve_env_type(env_cfg.get("type"))
     env_container = env_cfg.get("container")
     # `rcac-env setup --name X --py 3.12` creates the module `conda-env/X-py3.12`.
@@ -414,18 +414,30 @@ def launch(
             for stage in pipeline:
                 stage_name = stage["name"]
                 script = stage["script"]
-                # BUG-K2 fix: previously only `{config_path}` was substituted
-                # via str.replace, leaving every other manifest token
-                # (`{hdf5}`, `{exp_id}`, `{config_id}`, sweep keys, ...) as a
-                # literal in the sbatch args -> argparse failed at runtime.
-                # Now we expose base_params + per-combo sweep keys + meta keys
-                # via str.format_map, raising on truly missing keys so the
-                # author hears about typos rather than silent skips.
+                # Previously only `{config_path}` was substituted via
+                # str.replace, leaving every other manifest token (`{hdf5}`,
+                # `{exp_id}`, `{config_id}`, sweep keys, ...) as a literal in
+                # the sbatch args -> argparse failed at runtime.  Now we expose
+                # base_params + per-combo sweep keys + meta keys via
+                # str.format_map, raising on truly missing keys so the author
+                # hears about typos rather than silent skips.
+                #
+                # `config_dir` is the directory holding `config_path`, and it is
+                # the whole vocabulary a manifest has for naming an artefact one
+                # stage writes and a later stage reads.  There is deliberately
+                # no `{generate_data.output_path}` form: these stages are
+                # separate `sbatch` submissions chained by `--dependency`, so
+                # `launch` returns before stage one has run and CANNOT know
+                # what it produced.  Cross-stage values must therefore be
+                # *derivable* at launch time -- a path both stages compute the
+                # same way -- not *observed*.  `{config_dir}` plus the manifest's
+                # own `base_params` is what makes that possible.
                 fmt_ctx = {
                     **{k: v for k, v in base_params.items() if k != "_exp_id"},
                     **{k: v for k, v in config.items() if not k.startswith("_")},
                     "exp_id": exp_id,
                     "config_path": config_path,
+                    "config_dir": config_remote_dir,
                 }
                 raw_args = stage.get("args", "")
                 try:

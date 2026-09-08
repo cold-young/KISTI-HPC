@@ -67,7 +67,19 @@ cluster itself, `slist` prints the same thing.
 
 Anything that genuinely needs a resolved value — a scratch path, an `sbatch -A`
 — fails at the point of use with a message naming the environment variable and
-the config file it looked in. It never silently substitutes a default.
+the config file it looked in. **No credential and no path is ever silently
+substituted**, and neither is `-p` or `--time`: `configs/defaults.yaml` ships no
+partition (which partitions you may use depends on your account) and no
+walltime (Gilbreth's own default is 30 minutes, which kills essentially any
+real job).
+
+Two *resource requests* do carry defaults, and say so. Omit `--mem` and it is
+sized as `gpus_per_node × 32G`; omit `--cpus-per-gpu` and it is 8. Neither
+number comes from an RCAC page — `configs/defaults.yaml` records that beside
+each — and both are printed in the `#SBATCH` header `--dry-run` shows you, so
+neither is hidden. The asymmetry is deliberate: a wrong resource request queues
+longer or is OOM-killed, while a wrong account charges somebody else's
+allocation.
 
 ### 1.3 Generate the SSH config
 
@@ -80,9 +92,17 @@ This matters more on Gilbreth than on a single-headed cluster. The name
 `gilbreth.rcac.purdue.edu` resolves to **four front-end nodes**, round-robin, so
 without multiplexing your `sbatch` and your `squeue` can land on different
 hosts. The managed block sets `ControlMaster auto` with a persistent
-`ControlPath`, which **pins every later `rcac-*` command to the one front-end
-node the master session authenticated against** — and prompts Purdue Login once
-per `ControlPersist` window instead of once per command.
+`ControlPath` — OpenSSH's mechanism for **pinning every later `rcac-*` command
+to the one front-end node the master session authenticated against**, and for
+prompting Purdue Login once per `ControlPersist` window instead of once per
+command.
+
+That is what the configuration asks for, not a verified fact about Gilbreth.
+No page checked says whether its front ends accept SSH control sockets; a site
+can refuse them. Row **L2** of §7.2 is the single command that settles it, and
+it blocks the merge for exactly this reason — so until it has been run, treat
+every claim below about the socket being reused as the intended behaviour
+rather than the observed one.
 
 ```bash
 rcac-status                    # is the master socket alive?
@@ -129,7 +149,7 @@ here — they are open rows in [§7](#7-live-verification-checklist).
 
 Because one hostname fronts four nodes, a session that is not multiplexed is a
 session that changes machines under you. That is what §1.3's ControlMaster
-block is for.
+block is meant to prevent — pending L2.
 
 ### 2.2 Partitions — `-p` selects the GPU type
 
@@ -393,8 +413,9 @@ rcac-sync push-data <LOCAL_DATA_PATH> [--dry-run]
 ```
 
 Exclusions and pull filters live in `configs/defaults.yaml` under `sync:`.
-Every transfer reuses the ControlMaster socket, so a sync never triggers a
-second two-factor prompt. `push-data` prints the Globus route for anything
+Every transfer is routed over the ControlMaster socket, so a sync should not
+trigger a second two-factor prompt — intended behaviour, unverified until §7.2's
+L2 and L15. `push-data` prints the Globus route for anything
 large enough that a browser-driven transfer is the better tool.
 
 ### 5.3 Environments — `rcac-env`
@@ -456,8 +477,10 @@ rcac-results compare <PROJECT> <EXP_ID>...
 rcac-results sync-wandb <PROJECT> [--exp-id ID]
 ```
 
-`sync-wandb` pulls offline W&B runs down and syncs them locally, which is the
-usual shape on a cluster whose compute nodes do not reach the internet.
+`sync-wandb` pulls offline W&B runs down and syncs them locally. That is the
+usual shape when compute nodes have no outbound route to the internet; no page
+checked says whether Gilbreth's do, so offline mode is the safe default here
+rather than a documented necessity.
 
 ### 5.6 Partition picker — `rcac-partition`
 
@@ -509,8 +532,10 @@ threshold is 45 days, which keeps a quarter of the 60-day window in hand.
 
 `setup-cron` runs the sweep **on a front-end node** by default. The sweep is a
 metadata-only `find … -exec touch -a`, far below any reasonable front-end
-budget, whereas a batch job on Gilbreth would have to hold a GPU it never uses:
-every partition is a GPU partition and `--gpus-per-node` has a floor of 1.
+budget, whereas a batch job would probably have to hold a GPU it never uses:
+every partition RCAC documents for Gilbreth selects a GPU type (§2.2), and no
+page checked names a CPU-only one. That is the reason for the default, not a
+rule the cluster is known to enforce.
 `--batch` submits it as a job anyway, for sweeps large enough to deserve one or
 sites whose local policy forbids the front-end route.
 

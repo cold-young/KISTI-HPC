@@ -345,23 +345,44 @@ def init_pipeline(simulator: str, env_name: str, episodes: int, output: str, par
             "optimizer": "adamw",
             "seed": 42,
         },
+        # Stage args use only placeholders `rcac-exp launch` can actually
+        # resolve: `{config_path}`, `{config_dir}` and the manifest's own
+        # `base_params` keys.
+        #
+        # The generated manifest used to say `{generate_data.output_path}` and
+        # `{train.best_model}`. That syntax was never implemented and cannot
+        # be: the stages are separate `sbatch` submissions chained by
+        # `--dependency`, so `launch` has returned long before stage one runs
+        # and has nothing to read those values out of. `launch` rejected them
+        # with `unknown placeholder`, exit 2 -- so `rcac-sim init-pipeline`
+        # printed "To launch: rcac-exp launch ..." for a file that command
+        # refused. The two are composable again because every cross-stage value
+        # is now DERIVED the same way by both sides instead of observed:
+        #   * the dataset is `base_params.dataset`, which is also what
+        #     `train.py` falls back to when `--dataset` is absent;
+        #   * the checkpoint is `<config_dir>/checkpoints/best_model.pth`,
+        #     which is exactly where the scaffolded `train.py` writes it
+        #     (`Path(args.config).parent / "checkpoints"`).
+        # `examples/experiment_genesis.yaml`, the hand-written twin of this
+        # file, already spelled its stage args out this way.
         "pipeline": [
             {
                 "name": "generate_data",
                 "script": f"{simulator}_datagen.py",
-                "args": f"--env {env_name} --num_episodes {episodes} --output {{config_path}}/../data",
+                "args": f"--env {env_name} --num_episodes {episodes} --output {{dataset}}",
             },
             {
                 "name": "train",
                 "script": "train.py",
                 "depends_on": "generate_data",
-                "args": "--config {config_path} --dataset {generate_data.output_path}",
+                "args": "--config {config_path} --dataset {dataset}",
             },
             {
                 "name": "evaluate_sim",
                 "script": f"{simulator}_eval.py",
                 "depends_on": "train",
-                "args": "--checkpoint {train.best_model} --env " + env_name,
+                "args": "--checkpoint {config_dir}/checkpoints/best_model.pth --env "
+                + env_name,
             },
         ],
     }

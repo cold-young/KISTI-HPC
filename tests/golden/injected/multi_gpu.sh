@@ -26,7 +26,7 @@ export WANDB_MODE=offline
 export MASTER_ADDR=$(hostname)
 export MASTER_PORT=29500
 
-# === Distributed launch === (BUG-K1 fix: respect environment.type)
+# === Distributed launch === (honours environment.type)
 
 torchrun --nproc_per_node=2 --nnodes=1 \
     --master_addr=${MASTER_ADDR} --master_port=${MASTER_PORT} \

@@ -23,7 +23,7 @@ export EXPERIMENT_ID="exp_001"
 export CONFIG_PATH="configs/exp_001.yaml"
 export WANDB_MODE=offline
 
-# === Python invocation === (BUG-K1 fix: respect environment.type)
+# === Python invocation === (honours environment.type)
 
 python train.py --lr 1e-4
 

@@ -27,7 +27,7 @@ export WANDB_MODE=offline
 # === Python invocation ===
 # Wraps `python {script} {args}` according to environment.type declared in the
 # experiment.yaml. Without this branch, the host system python is used and
-# every K-UBM import fails immediately. (BUG-K1 fix.)
+# every import from the user's environment fails immediately.
 
 # Fallback: rely on PATH/modules already loaded above.
 python train.py 

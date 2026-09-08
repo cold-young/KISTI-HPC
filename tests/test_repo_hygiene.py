@@ -56,8 +56,21 @@ PKG = next(p for p in ("rcac_cli", "neuron_cli") if (ROOT / p).is_dir())
 #: Directory *names* pruned anywhere in the tree.  ``.omc/`` is load-bearing:
 #: ``.omc/plans/`` holds the port plan, which uses the word "neuron" hundreds
 #: of times and would make every ban row fail.
+#: ``.pytest_cache`` joins the generated-artefact group (``__pycache__``,
+#: ``build``, ``dist``) now that :data:`MARKDOWN_GLOBS` reaches below the top
+#: level: the cache directory ships a ``README.md`` that pytest wrote and no
+#: one here maintains.
 EXCLUDED_DIR_NAMES = frozenset(
-    {".git", ".venv", ".omc", ".history", "__pycache__", "build", "dist"}
+    {
+        ".git",
+        ".venv",
+        ".omc",
+        ".history",
+        "__pycache__",
+        ".pytest_cache",
+        "build",
+        "dist",
+    }
 )
 
 #: Directory *suffixes* pruned anywhere in the tree (``*.egg-info/``).
@@ -336,10 +349,31 @@ COMMIT_CHANGE_LISTS: dict[str, set[str]] = {
     #     bent into a shape the scope table cannot hold. It is also this
     #     commit's arrival marker.
     #   * `tests/test_repo_hygiene.py` for that marker and for ACTIVE_COMMIT.
+    #
+    # The final review added six more paths, and none of them is documentation
+    # work -- they are the code the documentation turned out to be wrong about,
+    # which is the only kind of finding a docs commit can legitimately grow:
+    #   * `{pkg}/simulator.py` and `{pkg}/experiment.py`: README section 6's
+    #     Scenario B ran `init-pipeline` then `launch` and the second command
+    #     exited 2, because the generated manifest used a cross-stage
+    #     placeholder syntax that was never implemented. Publishing it as a
+    #     worked example is what made a pre-existing defect a C7 defect.
+    #   * `{pkg}/discovery.py`: two comments still justified their behaviour by
+    #     a hard error that the sinfo-only change had already removed.
+    #   * `configs/defaults.yaml` and its packaged copy: `cpus_per_gpu` shipped
+    #     unsourced next to a `mem` default that hedges itself honestly, and
+    #     README section 1.2 claimed no default is ever substituted.
+    #   * `tests/test_console_scripts.py` is new -- see the arrival markers.
     "C7": {
         "README.md",
         "README.ko.md",
+        "configs/defaults.yaml",
+        "{pkg}/configs/defaults.yaml",
+        "{pkg}/discovery.py",
+        "{pkg}/experiment.py",
+        "{pkg}/simulator.py",
         "tests/test_readme.py",
+        "tests/test_console_scripts.py",
         "tests/test_repo_hygiene.py",
     },
 }
@@ -385,7 +419,13 @@ TEMPLATE_GLOBS: Tuple[str, ...] = (
     "templates/**/*.j2",
     "{pkg}/templates/**/*.j2",
 )
-MARKDOWN_GLOBS: Tuple[str, ...] = ("*.md",)
+#: Every markdown page in the tree, not only the two at the top level.  The
+#: narrow ``("*.md",)`` form was the same blind spot as the unscanned
+#: ``{pkg}/configs/**`` and ``scripts/**``: correct for the tree as it stood and
+#: silently wrong for the first ``docs/`` page anyone adds, which would fall
+#: outside AC-1.7, AC-8.4 and AC-8.5 without any test saying so.  A scope that
+#: has to be widened by remembering to widen it is the failure P6 names.
+MARKDOWN_GLOBS: Tuple[str, ...] = ("**/*.md",)
 
 #: The history fence -- the only region of a README where legacy branding may
 #: survive (AC-1.7, AC-8.4).
@@ -849,7 +889,7 @@ def test_package_root_resolves_to_exactly_one_package():
 
 
 def test_exclusion_walk_prunes_every_named_directory():
-    """AC-0.2 -- the walk excludes the nine named locations."""
+    """AC-0.2 -- the walk excludes every named location."""
     scanned = iter_files(ROOT)
     assert scanned, "the exclusion walk returned no files at all"
 
@@ -948,13 +988,19 @@ COMMIT_ARRIVAL_MARKERS: dict[str, Tuple[str, ...]] = {
     # window, the config scratch root) -- so the commit that fixes them is
     # also the commit that gives them somewhere to live.
     "C6": ("tests/test_keepalive.py",),
-    # C7 created one file too. The `.md` layer's ban rows (AC-1.7, AC-8.4,
+    # C7 created two files. The `.md` layer's ban rows (AC-1.7, AC-8.4,
     # AC-8.5) are HygieneRows and need no new module, but the five AC-8
     # criteria that assert PRESENCE rather than absence do -- see the C7
     # change list. That module existing is therefore exactly equivalent to
     # C7's documentation work existing, which is what an arrival marker has
     # to be.
-    "C7": ("tests/test_readme.py",),
+    #
+    # `tests/test_console_scripts.py` is the second, and it is here rather
+    # than at C1 (where AC-1.3 first applies) for the same reason: it is the
+    # commit that created it. AC-1.3 went unchecked from C1 to C7 -- not
+    # excused, not deferred, simply never written down as a test -- and the
+    # module records why in its own docstring.
+    "C7": ("tests/test_readme.py", "tests/test_console_scripts.py"),
 }
 
 

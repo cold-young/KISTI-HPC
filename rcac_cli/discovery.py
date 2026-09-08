@@ -63,7 +63,16 @@ SLIST_COMMAND = "slist"
 #: Partition state.  The format string is SLURM's own and is stable across
 #: sites, which is why this is the one probe whose output shape is not in
 #: question.  ``--noheader`` keeps :func:`parse_sinfo` from having to.
-SINFO_COMMAND = "sinfo -o '%P %a %D %T %N %G' --noheader"
+#:
+#: ``-a`` is load-bearing, not tidiness.  SLURM defines it as showing partitions
+#: "configured as hidden and partitions that are unavailable to the user's
+#: group" -- so *without* it ``sinfo`` is access-scoped, exactly like ``slist``.
+#: This output is the sole feeder of :attr:`ClusterView.known_partitions`, whose
+#: only use is a hard error, so an access-scoped answer here reports a partition
+#: you merely cannot use as one that "does not exist on this cluster".  That is
+#: the same false, unactionable error that removing ``slist`` from this set was
+#: meant to eliminate; dropping ``-a`` would just move it one probe to the left.
+SINFO_COMMAND = "sinfo -a -o '%P %a %D %T %N %G' --noheader"
 
 #: RCAC's node-feature reporter.  Consulted for exactly one thing today --
 #: whether ``nvlink`` is a real feature name on this cluster -- so its parser is
@@ -413,10 +422,18 @@ def _slist_group_labels(lines: Sequence[str], header_index: int) -> tuple:
             return ()
         if any(t.lower() in _SLIST_PROSE for t in tokens):
             return ()
-        # Lowercased because these become partition names, and
-        # `gilbreth.build_directives` compares `-p` against `known_partitions`
-        # exactly: a label read as `A100-40gb` would hard-error `-p a100-40gb`,
-        # i.e. discovery would reject the very partition it just discovered.
+        # Lowercased so a heading lifted out of a `slist` group header is
+        # spelled the way `sinfo` reports the partition and the way `-p` takes
+        # it -- `A100-40GB` and `a100-40gb` naming one column would otherwise
+        # be a difference the reader has to resolve.
+        #
+        # This is a *display* rule and nothing more. These labels head the
+        # `rcac-partition` matrix and key its per-account counters; they do not
+        # reach `ClusterView.known_partitions`, whose sole feeder is `sinfo`
+        # (see SINFO_COMMAND). `parse_sinfo` deliberately does NOT lowercase
+        # in the same way: those names come from the scheduler itself, so they
+        # are authoritative and case-exact, and folding their case would be
+        # this module editing the one answer it is entitled to quote.
         return tuple(t.lower() for t in tokens)
     return ()
 
@@ -577,8 +594,12 @@ def parse_slist(text: str) -> SlistMatrix:
         labels = tuple(f"column{i}" for i in range(group_count))
 
     # Only *named* columns seed the partition list.  A generated ``columnN`` is
-    # a placeholder, and a placeholder that reached `known_partitions` would
-    # hard-error a submission naming a partition that really exists.
+    # positional bookkeeping, not something the cluster said, and printing it
+    # in the GPU-type row of the matrix would be inventing a partition name --
+    # the one thing P1 forbids outright.  It cannot do worse than mislead a
+    # reader: `known_partitions` is fed by `sinfo` alone, so no label from here
+    # can hard-error a submission.  That is why the columns are still numbered
+    # and shown rather than dropped -- the counters under them are real.
     partitions: list = list(labels) if labels_are_real else []
     rows: list = []
     for line in lines[header_index + 1 :]:
