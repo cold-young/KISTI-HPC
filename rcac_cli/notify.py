@@ -1,28 +1,65 @@
-"""Notification system for SLURM job completion/failure."""
+"""Notification system for SLURM job completion/failure.
+
+``notify.yaml`` is resolved through the same three tiers as every other config
+(AC-2.8): ``$RCAC_CONFIG_DIR`` -> ``./configs/`` -> the copies packaged inside
+the wheel.  It used to be looked up as ``Path(__file__).parent.parent /
+"configs"``, which is the repo root only while running from a checkout -- after
+``pip install`` that resolves inside ``site-packages``, so ``rcac-notify`` could
+not see a user's config at all and ``rcac-notify setup`` tried to write into the
+installed package.
+"""
 
 from __future__ import annotations
 
 import json
 import smtplib
-import subprocess
-import sys
 from email.mime.text import MIMEText
 from pathlib import Path
+from typing import Optional
 from urllib.request import Request, urlopen
 
 import click
 import yaml
 
-from .config import get_rcac_config
+from .config import config_search_path, resolve_config_path
+
+#: Base name of the notification config, resolved via :mod:`rcac_cli.config`.
+NOTIFY_CONFIG_NAME = "notify"
+
+
+def notify_config_path() -> Optional[Path]:
+    """The ``notify.yaml`` in effect, or ``None`` if no tier holds one."""
+    try:
+        return resolve_config_path(NOTIFY_CONFIG_NAME)
+    except FileNotFoundError:
+        return None
+
+
+def notify_config_target() -> Path:
+    """Where ``rcac-notify setup`` writes.
+
+    The *first* tier of the search path -- ``$RCAC_CONFIG_DIR`` when set,
+    otherwise ``./configs/``.  Never the packaged tier, which is last in the
+    list and is read-only in any real installation.
+    """
+    return config_search_path()[0] / f"{NOTIFY_CONFIG_NAME}.yaml"
 
 
 def _load_notify_config() -> dict:
-    """Load notification config from configs/notify.yaml or environment."""
-    config_path = Path(__file__).parent.parent / "configs" / "notify.yaml"
-    if config_path.exists():
-        with open(config_path) as f:
-            return yaml.safe_load(f) or {}
-    return {}
+    """Load the notification config from the resolved config directory."""
+    config_path = notify_config_path()
+    if config_path is None:
+        return {}
+    with open(config_path) as f:
+        return yaml.safe_load(f) or {}
+
+
+def _config_hint() -> str:
+    """The path an error message should point the user at."""
+    found = notify_config_path()
+    if found is not None:
+        return str(found)
+    return f"{notify_config_target()} (run `rcac-notify setup` to create it)"
 
 
 def send_slack(webhook_url: str, message: str, color: str = "#36a64f") -> bool:
@@ -101,7 +138,7 @@ def notify_job_result(
     if method == "slack":
         webhook = config.get("slack", {}).get("webhook_url", "")
         if not webhook:
-            click.echo("Error: Slack webhook URL not configured in configs/notify.yaml")
+            click.echo(f"Error: Slack webhook URL not configured in {_config_hint()}")
             return
         color = "#36a64f" if status == "0" else "#ff0000"
         if send_slack(webhook, message, color):
@@ -109,7 +146,7 @@ def notify_job_result(
     elif method == "email":
         email_cfg = config.get("email", {})
         if not email_cfg.get("to"):
-            click.echo("Error: Email not configured in configs/notify.yaml")
+            click.echo(f"Error: Email not configured in {_config_hint()}")
             return
         subject = f"[RCAC] {job_name} - {status_text}"
         if send_email(
@@ -139,7 +176,7 @@ def test(method: str, message: str) -> None:
     if method == "slack":
         webhook = config.get("slack", {}).get("webhook_url", "")
         if not webhook:
-            click.echo("Error: Set slack.webhook_url in configs/notify.yaml")
+            click.echo(f"Error: Set slack.webhook_url in {_config_hint()}")
             return
         if send_slack(webhook, f"🔔 {message}"):
             click.echo("Test notification sent to Slack.")
@@ -148,7 +185,7 @@ def test(method: str, message: str) -> None:
     elif method == "email":
         email_cfg = config.get("email", {})
         if not email_cfg.get("to"):
-            click.echo("Error: Set email.to in configs/notify.yaml")
+            click.echo(f"Error: Set email.to in {_config_hint()}")
             return
         if send_email(
             smtp_host=email_cfg.get("smtp_host", "smtp.gmail.com"),
@@ -167,12 +204,14 @@ def test(method: str, message: str) -> None:
 @cli.command()
 def setup() -> None:
     """Generate a template notification config file."""
-    config_path = Path(__file__).parent.parent / "configs" / "notify.yaml"
-
-    if config_path.exists():
-        click.echo(f"Config already exists: {config_path}")
+    existing = notify_config_path()
+    if existing is not None:
+        click.echo(f"Config already exists: {existing}")
         click.echo("Edit it directly to update settings.")
         return
+
+    config_path = notify_config_target()
+    config_path.parent.mkdir(parents=True, exist_ok=True)
 
     template = {
         "slack": {
