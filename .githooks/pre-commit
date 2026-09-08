@@ -8,8 +8,9 @@
 # Uninstall:  git config --unset core.hooksPath
 # Bypass once (do this only if you know why): git commit --no-verify
 #
-# This repository has no CI -- .github/workflows/deploy.yml is an orphan mkdocs
-# job -- so this hook is the only automatic enforcement the check ever gets.
+# CI runs the same check on every push. This hook is what stops a credential
+# before it is committed at all; CI can only report one that already landed,
+# and a rewrite of published history is a far worse day than a refused commit.
 set -e
 
 root=$(git rev-parse --show-toplevel)

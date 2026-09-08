@@ -26,8 +26,9 @@ Install the hook (one line, from the repo root)::
 
     git config core.hooksPath .githooks
 
-This repository has no CI, so that hook is the only automatic enforcement this
-check ever gets.  Running it by hand::
+CI runs this same check on every push.  The hook is the half that acts before a
+credential is committed at all; CI can only report one that already landed.
+Running it by hand::
 
     python3 scripts/check_credentials.py --staged
 """

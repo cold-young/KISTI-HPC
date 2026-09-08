@@ -1,0 +1,84 @@
+name: ci
+
+on:
+  push:
+    branches: [main, rcac]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    # The declared floor is exercised, not asserted. `requires-python = ">=3.9"`
+    # was false until this port: two modules used PEP 604 unions in runtime
+    # annotations without the future import, which killed four of the twelve
+    # console scripts at import on 3.9. Nothing caught it, because nothing ran
+    # on 3.9.
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e ".[dev]"
+      # --strict-markers so an unregistered marker is a collection error, and
+      # -rs so a skip is visible: the suite is meant to have none. The
+      # unverified_fixture marker is a provenance label, never a skip.
+      - run: pytest -q --strict-markers -rs
+
+  credentials:
+    # The server-side half of the pre-commit hook. The hook is per-clone local
+    # config, so it protects whoever ran `git config core.hooksPath .githooks`
+    # and nobody else. This catches the rest.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pyyaml
+      - name: No real Purdue credential is tracked
+        run: python scripts/check_credentials.py
+
+  wheel:
+    # AC-2.7/2.8. A source checkout always finds ./configs/, so it can never
+    # tell you whether an INSTALL can. This is the only check that reaches the
+    # packaged tier, and it was previously run by hand.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build
+      - run: python -m build --wheel
+      - name: Templates and configs ship inside the wheel
+        run: |
+          python - <<'PY'
+          import glob, zipfile, sys
+          wheel = glob.glob("dist/*.whl")[0]
+          names = zipfile.ZipFile(wheel).namelist()
+          want = ["_sbatch_header.j2", "single_gpu.sh.j2", "multi_gpu.sh.j2",
+                  "job_array.sh.j2", "pipeline.sh.j2", "keepalive.sh.j2",
+                  "configs/rcac.yaml", "configs/defaults.yaml"]
+          missing = [w for w in want if not any(n.endswith(w) for n in names)]
+          print(f"{len(names)} entries; checked {len(want)} by name")
+          if missing:
+              sys.exit("missing from the wheel: " + ", ".join(missing))
+          PY
+      - name: An installed copy runs from a directory with no configs/
+        run: |
+          python -m venv /tmp/clean
+          /tmp/clean/bin/pip install --quiet dist/*.whl
+          mkdir -p /tmp/nowhere && cd /tmp/nowhere
+          test ! -e configs
+          for s in rcac-connect rcac-status rcac-disconnect rcac-sync rcac-env \
+                   rcac-exp rcac-results rcac-container rcac-partition \
+                   rcac-keepalive rcac-notify rcac-sim; do
+            /tmp/clean/bin/$s --help > /dev/null || { echo "FAIL $s"; exit 1; }
+          done
+          echo "12/12 console scripts respond from an install with no source tree"

@@ -122,9 +122,9 @@ git config core.hooksPath .githooks
 
 That one command installs a `pre-commit` hook that parses every staged
 `configs/*.yaml` and **refuses the commit** if `ssh.user` or `slurm.account`
-holds anything other than a placeholder. This repository has no CI — the
-workflow under `.github/` is an orphan docs job — so **the hook is the only
-automatic guard there is**. Install it before your first commit.
+holds anything other than a placeholder. CI runs the same check on every push,
+but the hook is what stops a credential **before** it reaches a commit — CI can
+only tell you it already did. Install it before your first commit.
 
 `git commit --no-verify` bypasses it. Do that only when you know why.
 
