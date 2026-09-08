@@ -96,7 +96,7 @@ COMMIT_ORDER: Tuple[str, ...] = (
 #: The commit currently being authored.  Bump this as each commit lands; every
 #: row whose ``earliest_commit`` is <= this value becomes enforced.  Rows above
 #: it are inactive *by construction* -- filtered out, never skipped (AC-7.6).
-ACTIVE_COMMIT = "C6"
+ACTIVE_COMMIT = "C7"
 
 
 def commit_index(commit: str) -> int:
@@ -314,12 +314,33 @@ COMMIT_CHANGE_LISTS: dict[str, set[str]] = {
         "tests/test_repo_hygiene.py",
     },
     # C7 -- documentation.  The `.md` layer enters scope here and nowhere
-    # earlier (AC-0.3(c)).
+    # earlier (AC-0.3(c)), which is what makes AC-1.7, AC-8.4 and AC-8.5
+    # enforceable for the first time.
+    #
+    # Measured from `git status` after the work, like C5's and C6's, and the
+    # difference from the plan's step list runs in BOTH directions again:
+    #
+    #   * `containers/*.def` and `examples/*.yaml` are NOT here. The plan's
+    #     step 3 called for a final pass over them; the pass happened and
+    #     changed nothing, because C1 and C4 had already cleaned both and the
+    #     examples' Gilbreth `slurm:` blocks were rewritten in C3b. Declaring
+    #     a path this commit does not touch would let
+    #     `changed_paths_through` permit a dirty file that nothing cleaned --
+    #     the defect C6 recorded and refused for `sync.py`/`notify.py`.
+    #   * `tests/test_readme.py` is new. AC-8.2, AC-8.3, AC-8.7, AC-8.9 and
+    #     AC-8.10 are all "this must be PRESENT" criteria, and a HygieneRow
+    #     expresses only "this must be ABSENT" -- a ban pattern plus path
+    #     globs. They needed a parser each (an HTML-comment fence walker, a
+    #     `pyproject.toml` reader, a fence-stripping heading lexer, a CLI
+    #     invocation), so they live in their own module rather than being
+    #     bent into a shape the scope table cannot hold. It is also this
+    #     commit's arrival marker.
+    #   * `tests/test_repo_hygiene.py` for that marker and for ACTIVE_COMMIT.
     "C7": {
         "README.md",
         "README.ko.md",
-        "containers/*.def",
-        "examples/*.yaml",
+        "tests/test_readme.py",
+        "tests/test_repo_hygiene.py",
     },
 }
 
@@ -927,6 +948,13 @@ COMMIT_ARRIVAL_MARKERS: dict[str, Tuple[str, ...]] = {
     # window, the config scratch root) -- so the commit that fixes them is
     # also the commit that gives them somewhere to live.
     "C6": ("tests/test_keepalive.py",),
+    # C7 created one file too. The `.md` layer's ban rows (AC-1.7, AC-8.4,
+    # AC-8.5) are HygieneRows and need no new module, but the five AC-8
+    # criteria that assert PRESENCE rather than absence do -- see the C7
+    # change list. That module existing is therefore exactly equivalent to
+    # C7's documentation work existing, which is what an arrival marker has
+    # to be.
+    "C7": ("tests/test_readme.py",),
 }
 
 
