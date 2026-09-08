@@ -14,7 +14,7 @@
 **/*.usdc
 **/*.usdz
 /results
-
+.omc/
 .db
 .db-shm
 .db-wal
