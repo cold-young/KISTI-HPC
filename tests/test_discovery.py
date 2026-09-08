@@ -844,18 +844,26 @@ def cluster_view(slist_text=None, sinfo_text=None) -> ClusterView:
 
 
 @pytest.mark.unverified_fixture
-def test_known_partitions_is_the_union_of_both_probes():
-    """The h100 contradiction reaches AC-3.8's tri-state as evidence.
+def test_known_partitions_comes_from_sinfo_alone_not_from_slist():
+    """AC-3.8's tri-state is fed by "what exists", not "what may I charge".
 
-    ``slist`` reports an ``h100`` column that ``sinfo`` does not list, and
-    ``sinfo`` reports ``training``, which has no ``slist`` column.  Both are
-    real answers from the cluster, so both are known partitions.
+    ``slist`` is the primary probe everywhere else, but RCAC's FAQ says it
+    prints the access to each GPU type *for each account you are a member of*.
+    The only use of ``known_partitions`` is a hard error, so sourcing it from
+    ``slist`` would turn "you have no allocation here" into ``partition 'X'
+    does not exist on this cluster`` -- false, and unactionable.
+
+    The fixtures make the difference observable: ``slist`` carries an ``h100``
+    column that ``sinfo`` does not list, and ``sinfo`` lists ``training``,
+    which has no ``slist`` column.  Only the second set may veto a submission.
     """
     view = cluster_view(load_fixture("slist.txt"), load_fixture("sinfo.txt"))
 
-    assert view.known_partitions == frozenset(
-        {"a10", "a30", "a100-40gb", "a100-80gb", "h100", "training"}
-    )
+    assert view.known_partitions == frozenset(view.queue_state)
+    assert "training" in view.known_partitions
+    # Present in slist, absent from sinfo: it must NOT become submittable-by-veto.
+    assert "h100" in view.matrix.partitions
+    assert "h100" not in view.known_partitions
     assert view.discovered is True
     assert view.warnings == []
 
@@ -866,9 +874,12 @@ def test_one_failed_probe_does_not_cost_the_other(caplog):
     view = cluster_view(slist_text=load_fixture("slist.txt"))
 
     assert view.discovered is True
-    assert view.known_partitions == frozenset(
-        {"a10", "a30", "a100-40gb", "a100-80gb", "h100"}
-    )
+    # slist answered, so the matrix is shown to the user...
+    assert view.matrix.partitions
+    # ...but with sinfo absent nothing enumerated what EXISTS, so the tri-state
+    # stays at "not attempted": an unrecognised -p warns and renders rather
+    # than hard-erroring on the strength of an account-scoped answer.
+    assert view.known_partitions is None
     assert view.warnings == ["sinfo discovery did not run: disabled"]
     assert view.queue_state == {}
     assert view.features == frozenset()

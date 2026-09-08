@@ -614,7 +614,7 @@ ControlMaster 소켓을 공유하도록 한 세션 안에서 전부 실행하세
 | **L3** | `apptainer --nv` 가 동작하나? | `apptainer exec --nv <img>.sif nvidia-smi` | `--nv` 기본값 유지 여부 |
 | **L4** | `sacct` / `showpartitions` 가 있나? | `which sacct showpartitions ; sacct -j <id>` | `rcac-exp status`가 `sacct`를 쓸 수 있는지 |
 | **L5** | `sfeatures` 출력 형식 | `sfeatures \| tee tests/fixtures/sfeatures.txt` | 문서 기반 픽스처를 대체. **`sfeatures` 존재 자체가 미확인** |
-| **L5b** | `slist`는 계정 범위로만 출력되나? | `slist \| tee tests/fixtures/slist.txt` | RCAC FAQ는 **내 계정이 닿는** GPU 종류만 찍힌다는 뜻으로 읽힙니다. 그렇다면 발견된 파티션 목록은 `sinfo` 만으로 만들어야 합니다. 아니면 과금 권한이 없을 뿐 실재하는 파티션이 "이 클러스터에 없음"으로 보고됩니다 |
+| **L5b** | `slist`가 계정 범위인지 확인 | `slist \| tee tests/fixtures/slist.txt` | **이미 반영됨.** RCAC FAQ에 따르면 `slist`는 *내가 속한 각 계정이* 접근 가능한 GPU 타입만 출력하므로, 발견된 파티션 목록은 `sinfo`에서만 가져온다 — 그러지 않으면 실제로 존재하지만 과금 권한만 없는 파티션이 "이 클러스터에 없다"로 보고된다. 실제 출력을 받아 형식을 확인하고 문서 기반 픽스처를 교체할 것 |
 | **L6** | 나에게 `/depot/<group>` 이 있나? | `ls -d /depot/*/ ; echo $RCAC_SCRATCH ; findscratch` | 선택 항목 `paths.depot` 을 채움. Gilbreth 문서에는 없음 |
 | **L7** | 계정별 작업 수 제한 | `sacctmgr show assoc user=$USER format=Account,MaxJobs,MaxSubmit` | 스윕 크기의 상한 |
 | **L8** | 실제 모듈 이름과 버전 | `module spider anaconda ; module avail` ; `module spider ml-toolkit` | **여기서 출력되지 않은 이름은 적지 말 것.** 어떤 RCAC Gilbreth 문서도 `ml-toolkit*` 모듈이나 특정 `anaconda` 버전을 명시하지 않습니다 |

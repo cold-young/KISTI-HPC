@@ -1029,17 +1029,20 @@ class ClusterView:
         an answer nobody gave.  :func:`rcac_cli.gilbreth._known_partition_set`
         repeats the fold for callers that bypass this property; the two are
         belt and braces on the same rule.
+
+        **``slist`` is deliberately not a source here, though it is the primary
+        probe everywhere else.**  RCAC's FAQ says it prints the access to each
+        GPU type *for each account you are a member of* -- it answers "what may
+        I charge", not "what exists".  Feeding it into a set whose only use is a
+        hard error turns "you have no allocation on this partition" into
+        ``partition 'a30' does not exist on this cluster``, which is both false
+        and unactionable.  ``sinfo`` asks the scheduler what exists, which is
+        the question being answered.  The matrix is still shown to the user by
+        ``rcac-partition``; it just does not get to veto a submission.
         """
-        names: set = set()
-        if self.slist.ok:
-            names.update(
-                name
-                for name in self.matrix.partitions
-                if not name.startswith("column")
-            )
-        if self.sinfo.ok:
-            names.update(self.queue_state)
-        return frozenset(names) or None
+        if not self.sinfo.ok:
+            return None
+        return frozenset(self.queue_state) or None
 
 
 def survey(
