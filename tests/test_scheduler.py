@@ -594,6 +594,12 @@ CLI_ENV = {
     "RCAC_USER": "testid",
     "RCAC_ACCOUNT": "testqueue",
     "RCAC_CONFIG_DIR": str(REPO_ROOT / "configs"),
+    # C5 wired real discovery into `rcac-exp launch`, so a run without this
+    # would ssh to a Purdue login node from the test suite. The suite asserts
+    # on what the CLI renders, not on what the cluster says; the discovery
+    # path itself is covered by tests/test_discovery.py and by the AC-4.6
+    # onboarding test, both of which set this deliberately.
+    "RCAC_NO_DISCOVER": "1",
 }
 
 

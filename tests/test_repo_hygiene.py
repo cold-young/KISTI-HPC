@@ -96,7 +96,7 @@ COMMIT_ORDER: Tuple[str, ...] = (
 #: The commit currently being authored.  Bump this as each commit lands; every
 #: row whose ``earliest_commit`` is <= this value becomes enforced.  Rows above
 #: it are inactive *by construction* -- filtered out, never skipped (AC-7.6).
-ACTIVE_COMMIT = "C4"
+ACTIVE_COMMIT = "C5"
 
 
 def commit_index(commit: str) -> int:
@@ -244,11 +244,36 @@ COMMIT_CHANGE_LISTS: dict[str, set[str]] = {
         "tests/golden/**",
     },
     # C5 -- runtime discovery and partition selection.
+    #
+    # Measured against the tree, not copied from the plan's step list, which
+    # named four paths.  The three commits before this one each under-declared
+    # (6->11, 2->7, 6->15) and AC-0.6 caught each one, so the count is derived
+    # here the same way: `git status` after the work, then every path it names.
+    #
+    # The five the plan does not mention are each a consequence of wiring
+    # discovery to something rather than of writing it:
+    #   * `experiment.py` is where AC-3.8's tri-state stops being a parameter
+    #     nobody passes -- `rcac-exp launch` is the caller that supplies it.
+    #   * `simulator.py` carried the second partition->GPU map (B8/AC-4.4).
+    #   * `pyproject.toml` declares the `unverified_fixture` marker, without
+    #     which `--strict-markers` fails on the fixture tests (AC-7.6).
+    #   * `tests/test_scheduler.py`, `tests/test_choke_point.py` and
+    #     `tests/test_config.py` invoke `rcac-exp launch`, which now probes a
+    #     cluster; each one pins discovery off so the suite stays offline.
     "C5": {
         "{pkg}/discovery.py",
         "{pkg}/partition_selector.py",
         "{pkg}/gilbreth.py",
+        "{pkg}/experiment.py",
+        "{pkg}/simulator.py",
+        "pyproject.toml",
         "tests/fixtures/**",
+        "tests/test_discovery.py",
+        "tests/test_partition_selector.py",
+        "tests/test_scheduler.py",
+        "tests/test_choke_point.py",
+        "tests/test_config.py",
+        "tests/test_repo_hygiene.py",
     },
     # C6 -- retention, simulator, transport.
     "C6": {
@@ -810,6 +835,83 @@ def test_vacuity_guard_scope_contains_enough_python_files():
         f"resolved hygiene scope holds only {len(py_files)} .py file(s), "
         f"expected >= {MIN_PY_FILES_IN_SCOPE}. The scope table has gone vacuous "
         f"(PKG={PKG!r}, ROOT={ROOT}). Files found: {py_files}"
+    )
+
+
+#: AC-0.6 -- files that arrive *with* a commit and exist in no earlier tree.
+#
+# `ACTIVE_COMMIT` is the one number in this module nothing else derives, so it
+# is the one number that can go stale silently -- and it did: it sat at "C2"
+# while C3a and C3b landed, which filed every C3 row as inactive *by
+# construction*. A filtered-out row does not fail, does not skip and does not
+# appear in the output, so two commits' worth of gates were simply not run and
+# nothing said so.
+#
+# The fix is to stop trusting the author to bump it. Each entry names a path
+# that a commit creates; if the path is in the tree, that commit's work is in
+# the tree, and `ACTIVE_COMMIT` must have caught up. Only *created* files
+# qualify -- a modified file cannot date itself.
+COMMIT_ARRIVAL_MARKERS: dict[str, Tuple[str, ...]] = {
+    "C0": ("tests/test_repo_hygiene.py", "tests/test_rendered_shape.py"),
+    "C2": ("{pkg}/_legacy.py", "tests/test_credentials.py"),
+    "C3a": ("{pkg}/gilbreth.py", "tests/test_gilbreth.py"),
+    "C3c": ("tests/test_choke_point.py",),
+    "C5": (
+        "{pkg}/discovery.py",
+        "tests/test_discovery.py",
+        "tests/test_partition_selector.py",
+    ),
+}
+
+
+def test_active_commit_has_not_gone_stale():
+    """AC-0.6 -- the tree decides which commit is active, not the author.
+
+    Derived rather than declared, for the same reason section 3.0 derives
+    hygiene scope: the failure this closes is not "someone chose the wrong
+    value", it is "nobody chose at all". A stale `ACTIVE_COMMIT` is invisible
+    by design -- rows above it are *filtered out*, and a filtered row produces
+    no output at all, not even a skip.
+    """
+    landed = []
+    for commit, markers in COMMIT_ARRIVAL_MARKERS.items():
+        present = [_expand(m) for m in markers if (ROOT / _expand(m)).exists()]
+        if present:
+            landed.append((commit, present))
+
+    assert landed, (
+        "no commit marker resolved at all, so this test cannot fail for the "
+        f"right reason (ROOT={ROOT}, PKG={PKG!r})"
+    )
+    newest, evidence = max(landed, key=lambda item: commit_index(item[0]))
+    assert commit_index(ACTIVE_COMMIT) >= commit_index(newest), (
+        f"ACTIVE_COMMIT is {ACTIVE_COMMIT!r} but {newest} has already landed: "
+        f"{evidence} exist(s) in the tree. Every row whose earliest_commit is "
+        f"after {ACTIVE_COMMIT!r} is currently filtered out of the enforced "
+        "set -- not skipped, not reported, just absent. Bump ACTIVE_COMMIT."
+    )
+
+
+def test_the_active_commit_declares_the_files_it_changed():
+    """AC-0.6 -- and the active commit's change list must not be a stub.
+
+    Every commit so far has under-declared its change list on the first pass
+    (6->11, 2->7, 6->15). This does not measure the diff -- that is
+    `test_meta_scope_is_derived_from_change_lists`' job, from the ban patterns'
+    side -- it only refuses the degenerate case of a commit that claims to
+    touch the module it is named for and nothing else.
+    """
+    declared = COMMIT_CHANGE_LISTS[ACTIVE_COMMIT]
+    assert declared, f"{ACTIVE_COMMIT} declares no changed paths at all"
+    resolved = [_expand(pattern) for pattern in declared]
+    existing = [
+        rel
+        for rel in resolved
+        if (ROOT / rel).exists() or list(ROOT.glob(rel))
+    ]
+    assert existing, (
+        f"none of {ACTIVE_COMMIT}'s declared paths resolve in the tree: "
+        f"{sorted(resolved)}"
     )
 
 

@@ -21,6 +21,7 @@ from ._legacy import LEGACY_ENV_TYPES
 #: `-py3.12` in `conda-env/train_env-py3.12`. Used only to notice a manifest
 #: that names the environment without it; see the warning in `launch`.
 PY_SUFFIX_RE = re.compile(r"-py\d+\.\d+")
+from . import discovery
 from .config import (
     get_defaults,
     get_rcac_config,
@@ -222,9 +223,12 @@ def cli() -> None:
               help="Override --gpus-per-node.")
 @click.option("--no-discover", is_flag=True,
               help="Do not ask the cluster for its partition list, so an "
-                   "unrecognised partition warns instead of failing. Runtime "
-                   "discovery is not implemented yet, so today every run "
-                   "already behaves this way.")
+                   "unrecognised partition warns instead of failing. Also "
+                   f"settable as {discovery.NO_DISCOVER_ENV}=1.")
+@click.option("--no-cache", is_flag=True,
+              help="Re-run every discovery probe instead of reusing this "
+                   "process's answers. Also settable as "
+                   f"{discovery.NO_CACHE_ENV}=1.")
 def launch(
     experiment_file: str,
     dry_run: bool,
@@ -237,6 +241,7 @@ def launch(
     constraint_override: str | None,
     gpu_override: int | None,
     no_discover: bool,
+    no_cache: bool,
 ) -> None:
     """Launch experiments from an experiment.yaml file."""
     cfg = get_rcac_config()
@@ -285,13 +290,27 @@ def launch(
     if not account:
         require_account(cfg)
 
-    # AC-3.8's tri-state. Runtime partition discovery lands with
-    # `discovery.py`; until then this is always None, meaning "not checked" --
-    # an unrecognised partition warns and renders rather than being rejected on
-    # the strength of a static table that may already be stale. `--no-discover`
-    # is accepted now so the flag's meaning is fixed before the behaviour it
-    # suppresses exists; it does not yet change anything.
+    # AC-3.8's tri-state, now fed by real discovery (AC-4.7).
+    #
+    # `None` means "not checked", and an unrecognised partition then warns and
+    # renders rather than being rejected on the strength of a static table that
+    # may already be stale. A populated set means the cluster itself
+    # enumerated its partitions, and a partition absent from it is a hard
+    # error. `ClusterView.known_partitions` folds an *empty* result back to
+    # `None` -- a probe that succeeded and reported zero partitions is a probe
+    # that failed without saying so, and honouring it literally would reject
+    # every submission.
+    #
+    # `--no-discover` skips the probes outright rather than running and
+    # discarding them: with discovery off there is no failure to report, so
+    # there is nothing to warn about either.
     known_partitions = None
+    if not discovery.discovery_disabled(no_discover):
+        view = discovery.survey(cfg, no_cache=no_cache)
+        known_partitions = view.known_partitions
+        # AC-4.2: every probe is optional and a failed one is a warning that
+        # joins the end-of-run summary, never an abort.
+        manifest_warnings.extend(view.warnings)
 
     env_cfg = exp.get("environment", {})
     # `name` is the environment as its MODULE is named on Gilbreth: the

@@ -173,6 +173,16 @@ PARTITION_HINTS: dict[str, dict] = {
 }
 
 
+#: **AC-4.4 / B8 -- the one partition -> GPU-type map.**  ``simulator.py``
+#: carried a second copy keyed by the previous cluster's partition names, so the
+#: two could not even be compared, let alone drift.  It is *derived* from
+#: :data:`PARTITION_HINTS` rather than written out, which is what makes "one
+#: map" a property of the code instead of a promise in a comment.
+PARTITION_GPU: dict[str, str] = {
+    name: hint["gpu"] for name, hint in PARTITION_HINTS.items()
+}
+
+
 # --------------------------------------------------------------------------
 # AC-4.3 -- QOS hints
 # --------------------------------------------------------------------------

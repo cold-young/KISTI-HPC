@@ -437,6 +437,9 @@ def test_dry_run_launch_succeeds_with_no_depot_key(isolated, monkeypatch):
     )
     monkeypatch.setenv(USER_ENV_VAR, "testid")
     monkeypatch.setenv(ACCOUNT_ENV_VAR, "testqueue")
+    # A resolved user is all `launch` needs to start probing the cluster (C5),
+    # and this test is about path resolution, not about what Gilbreth answers.
+    monkeypatch.setenv("RCAC_NO_DISCOVER", "1")
     experiment = isolated / "experiment_simple.yaml"
     experiment.write_text(
         (REPO_ROOT / "examples" / "experiment_simple.yaml").read_text(),

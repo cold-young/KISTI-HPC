@@ -44,3 +44,18 @@ include = ["rcac_cli*"]
 # live inside the package and are declared here AND in MANIFEST.in.
 [tool.setuptools.package-data]
 rcac_cli = ["templates/*.j2", "configs/*.yaml"]
+
+# AC-7.6.  The offline gate is `pytest -q --strict-markers`, so every marker the
+# suite uses has to be declared here or the run fails on an unknown marker.
+#
+# `unverified_fixture` is a PROVENANCE LABEL, NEVER A SKIP CONDITION.  The tests
+# carrying it run and must pass: they exercise the parsers in
+# `rcac_cli/discovery.py` against doc-derived sample output, which proves the
+# parser handles the documented shape and proves nothing whatever about the
+# cluster.  Plan section 6.2 rows L5/L5b replace those fixtures with real
+# captures from a login node; the marker is how you find every assertion that
+# has to be re-read when they do.  Nothing in the suite calls `pytest.skip`.
+[tool.pytest.ini_options]
+markers = [
+    "unverified_fixture: reads a doc-derived fixture under tests/fixtures/ that has never been captured from a live Gilbreth login node (plan R13, rows L5/L5b). Provenance label only -- the test runs and must pass.",
+]

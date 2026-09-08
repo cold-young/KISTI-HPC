@@ -14,14 +14,19 @@ import click
 import yaml
 
 from .config import get_defaults, get_rcac_config, require_account, require_user
-from .gilbreth import DEFAULT_QOS, build_directives, emit_warnings
+from .gilbreth import (
+    DEFAULT_QOS,
+    PARTITION_GPU,
+    PARTITION_HINTS,
+    build_directives,
+    emit_warnings,
+)
 from .ssh import ssh_opt_argv, ssh_target
 
 # Simulator compatibility matrix with RCAC GPUs
 SIMULATOR_COMPAT = {
     "genesis": {
         "display_name": "Genesis",
-        "gpu_support": {"V100": True, "A100": True, "H200": True},
         "rt_core_required": False,
         "container": "genesis-sim.sif",
         "pip_package": "genesis-world",
@@ -30,7 +35,6 @@ SIMULATOR_COMPAT = {
     },
     "mujoco": {
         "display_name": "MuJoCo (MJX)",
-        "gpu_support": {"V100": True, "A100": True, "H200": True},
         "rt_core_required": False,
         "container": None,
         "pip_package": "mujoco",
@@ -39,7 +43,6 @@ SIMULATOR_COMPAT = {
     },
     "isaac_gym": {
         "display_name": "Isaac Gym Preview",
-        "gpu_support": {"V100": True, "A100": True, "H200": True},
         "rt_core_required": False,
         "container": "isaacgym-preview.sif",
         "pip_package": None,  # manual install from NVIDIA
@@ -48,7 +51,6 @@ SIMULATOR_COMPAT = {
     },
     "isaac_sim": {
         "display_name": "Isaac Sim",
-        "gpu_support": {"V100": False, "A100": False, "H200": False},
         "rt_core_required": True,
         "container": None,
         "pip_package": None,
@@ -57,7 +59,6 @@ SIMULATOR_COMPAT = {
     },
     "pybullet": {
         "display_name": "PyBullet",
-        "gpu_support": {"V100": True, "A100": True, "H200": True},
         "rt_core_required": False,
         "container": None,
         "pip_package": "pybullet",
@@ -66,15 +67,14 @@ SIMULATOR_COMPAT = {
     },
 }
 
-# Partition -> GPU type mapping
-PARTITION_GPU = {
-    "amd_a100nv_8": "A100",
-    "eme_h200nv_8": "H200",
-    "amd_h200nv_8": "H200",
-    "cas_v100nv_8": "V100",
-    "cas_v100_4": "V100",
-    "cas_v100_2": "V100",
-}
+# B8/AC-4.4: the partition -> GPU-type map is imported, not kept.  The copy
+# that lived here was keyed by the *previous* cluster's partition names, so
+# `rcac-sim init-pipeline -p a10` -- a real Gilbreth partition -- exited 1 with
+# "Unknown partition: a10".  Every valid Gilbreth partition was rejected and
+# every invalid one was accepted, which is what a second copy of a table buys
+# once the first one moves: the two cannot drift, because they cannot even be
+# compared.  `gilbreth.PARTITION_GPU` is derived from `PARTITION_HINTS`, so
+# there is now exactly one place a partition name is written down.
 
 # --------------------------------------------------------------------------
 # What `init-pipeline` asks for on behalf of the user (AC-3.19(b))
@@ -127,13 +127,30 @@ def check_compatibility(simulator: str, partition: str) -> dict:
 
     gpu_type = PARTITION_GPU.get(partition)
     if not gpu_type:
-        return {"compatible": False, "reason": f"Unknown partition: {partition}"}
-
-    supported = sim["gpu_support"].get(gpu_type, False)
-    if not supported:
         return {
             "compatible": False,
-            "reason": f"{sim['display_name']} is not supported on {gpu_type} ({partition}). {sim['notes']}",
+            "reason": (
+                f"Unknown partition: {partition}. Gilbreth's documented "
+                f"partitions are {', '.join(sorted(PARTITION_HINTS))}."
+            ),
+        }
+
+    # The per-GPU support matrix this used to consult is gone along with the
+    # partition map that keyed it.  It listed the previous cluster's GPU types
+    # and said "yes, CUDA works" for every one of them, which is neither a fact
+    # about Gilbreth nor a fact worth a table.  The one real constraint is the
+    # RT cores Isaac Sim needs: RCAC does not document whether Gilbreth's A10
+    # nodes expose them (plan section 6.2 row L16), and an unconfirmed yes is a
+    # no here -- a generated manifest that cannot run is worse than a refusal
+    # that names its reason.
+    if sim["rt_core_required"]:
+        return {
+            "compatible": False,
+            "reason": (
+                f"{sim['display_name']} needs RT Core GPUs, and no Gilbreth "
+                f"partition is documented as providing them ({gpu_type} on "
+                f"{partition}). {sim['notes']}"
+            ),
         }
 
     # No `partition` key: it echoed back an argument every caller already had,
@@ -177,7 +194,9 @@ def cli() -> None:
 
 @cli.command("compat")
 @click.argument("simulator", type=click.Choice(list(SIMULATOR_COMPAT.keys())))
-@click.option("--partition", "-p", default="amd_a100nv_8", help="Target partition")
+@click.option("--partition", "-p", default="a100-80gb",
+              help="Target partition (the GPU type). One of: "
+                   "a10, a30, a100-40gb, a100-80gb, training.")
 def check_compat(simulator: str, partition: str) -> None:
     """Check simulator compatibility with a RCAC partition."""
     result = check_compatibility(simulator, partition)
@@ -194,14 +213,17 @@ def check_compat(simulator: str, partition: str) -> None:
 @cli.command("list")
 def list_simulators() -> None:
     """Show all simulators and their RCAC GPU compatibility."""
-    click.echo(f"{'Simulator':<22} {'V100':<8} {'A100':<8} {'H200':<8} {'Notes'}")
+    # One column, not three.  The three it printed were V100/A100/H200 -- two
+    # GPUs this cluster does not have and one it does -- and after the per-GPU
+    # support matrix went (see `check_compatibility`) the remaining answer is
+    # the same for every GPU Gilbreth offers, so three identical columns would
+    # only imply a distinction that is not being made.
+    click.echo(f"{'Simulator':<22} {'Gilbreth':<10} {'Notes'}")
     click.echo("-" * 90)
 
     for key, sim in SIMULATOR_COMPAT.items():
-        v100 = "OK" if sim["gpu_support"]["V100"] else "NO"
-        a100 = "OK" if sim["gpu_support"]["A100"] else "NO"
-        h200 = "OK" if sim["gpu_support"]["H200"] else "NO"
-        click.echo(f"{sim['display_name']:<22} {v100:<8} {a100:<8} {h200:<8} {sim['notes']}")
+        supported = "NO" if sim["rt_core_required"] else "OK"
+        click.echo(f"{sim['display_name']:<22} {supported:<10} {sim['notes']}")
 
 
 @cli.command("check-env")
@@ -238,7 +260,10 @@ def check_env(simulator: str) -> None:
 @click.option("--env", "env_name", default="manipulation", help="Environment name")
 @click.option("--episodes", default=10000, help="Number of data generation episodes")
 @click.option("--output", "-o", default="experiment_sim.yaml", help="Output experiment file")
-@click.option("--partition", "-p", default="amd_a100nv_8", help="Target partition")
+@click.option("--partition", "-p", default="a100-80gb",
+              help="Target partition (the GPU type) written into the "
+                   "generated slurm: block. One of: a10, a30, "
+                   "a100-40gb, a100-80gb, training.")
 def init_pipeline(simulator: str, env_name: str, episodes: int, output: str, partition: str) -> None:
     """Generate a simulation -> training -> evaluation experiment.yaml.
 
