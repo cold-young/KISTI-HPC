@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import subprocess
-import sys
 
 import click
 
-from .config import get_rcac_config
+from .config import get_rcac_config, require_user
+from .ssh import ssh_opt_argv, ssh_target
 
 # Patterns for important files to keep alive
 KEEPALIVE_PATTERNS = [
@@ -25,14 +25,7 @@ KEEPALIVE_PATTERNS = [
 
 
 def _run_remote(cfg: dict, command: str) -> subprocess.CompletedProcess:
-    ssh = cfg["ssh"]
-    cmd = [
-        "ssh",
-        "-o", f"ControlPath={ssh['control_path']}",
-        "-p", str(ssh["port"]),
-        f"{ssh['user']}@{ssh['login_host']}",
-        command,
-    ]
+    cmd = ["ssh", *ssh_opt_argv(cfg), ssh_target(cfg), command]
     return subprocess.run(cmd, capture_output=True, text=True)
 
 
@@ -48,9 +41,7 @@ def touch(dry_run: bool, verbose: bool) -> None:
     """Update access time of important files to prevent purging."""
     cfg = get_rcac_config()
 
-    if not cfg["ssh"]["user"]:
-        click.echo("Error: RCAC_USER not set.")
-        sys.exit(1)
+    require_user(cfg)
 
     user = cfg["ssh"]["user"]
     scratch = f"/scratch/{user}"
@@ -87,9 +78,7 @@ def check_at_risk(days: int) -> None:
     """Show files at risk of being purged (not accessed recently)."""
     cfg = get_rcac_config()
 
-    if not cfg["ssh"]["user"]:
-        click.echo("Error: RCAC_USER not set.")
-        sys.exit(1)
+    require_user(cfg)
 
     user = cfg["ssh"]["user"]
     scratch = f"/scratch/{user}"
@@ -139,9 +128,7 @@ def setup_cron(interval: int) -> None:
     """Set up a recurring SLURM job to keep files alive."""
     cfg = get_rcac_config()
 
-    if not cfg["ssh"]["user"]:
-        click.echo("Error: RCAC_USER not set.")
-        sys.exit(1)
+    require_user(cfg)
 
     user = cfg["ssh"]["user"]
     scratch = f"/scratch/{user}"
@@ -192,10 +179,10 @@ bash {remote_script}
     click.echo(f"  SLURM:  {remote_slurm}")
     click.echo()
     click.echo(f"To run manually:")
-    click.echo(f"  ssh rcac 'sbatch {remote_slurm}'")
+    click.echo(f"  ssh gilbreth 'sbatch {remote_slurm}'")
     click.echo()
     click.echo(f"To set up periodic execution, add to crontab on RCAC:")
-    click.echo(f"  ssh rcac 'crontab -l 2>/dev/null; echo \"0 0 */{interval} * * sbatch {remote_slurm}\"' | ssh rcac 'crontab -'")
+    click.echo(f"  ssh gilbreth 'crontab -l 2>/dev/null; echo \"0 0 */{interval} * * sbatch {remote_slurm}\"' | ssh gilbreth 'crontab -'")
     click.echo()
     click.echo(f"Or submit it now:")
 

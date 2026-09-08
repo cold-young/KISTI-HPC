@@ -9,17 +9,13 @@ from pathlib import Path
 
 import click
 
-from .config import get_rcac_config
+from .config import get_rcac_config, require_user
+from .ssh import globus_guidance, ssh_opt_argv, ssh_opt_str, ssh_target, transfer_host
 
 
 def _ssh_cmd(cfg: dict) -> list[str]:
-    ssh = cfg["ssh"]
-    return [
-        "ssh",
-        "-o", f"ControlPath={ssh['control_path']}",
-        "-p", str(ssh["port"]),
-        f"{ssh['user']}@{ssh['login_host']}",
-    ]
+    """Build base SSH command using ControlMaster."""
+    return ["ssh", *ssh_opt_argv(cfg), ssh_target(cfg)]
 
 
 def _run_remote(cfg: dict, command: str) -> subprocess.CompletedProcess:
@@ -47,9 +43,7 @@ def build(def_file: str, name: str | None, remote_build: bool) -> None:
     image_name = name or def_path.stem + ".sif"
 
     if remote_build:
-        if not cfg["ssh"]["user"]:
-            click.echo("Error: RCAC_USER not set.")
-            sys.exit(1)
+        require_user(cfg)
 
         user = cfg["ssh"]["user"]
         remote_def = f"/scratch/{user}/.rcac-tools/{def_path.name}"
@@ -95,23 +89,27 @@ def push(image: str, dest: str | None) -> None:
     """Upload a Singularity image to RCAC."""
     cfg = get_rcac_config()
 
-    if not cfg["ssh"]["user"]:
-        click.echo("Error: RCAC_USER not set.")
-        sys.exit(1)
+    require_user(cfg)
 
     user = cfg["ssh"]["user"]
-    ssh = cfg["ssh"]
     image_path = Path(image)
 
-    # Use DM node for large file transfer (no CPU limit)
-    host = ssh["dm_host"]
+    # Gilbreth has no data-transfer node, so this goes over the login host.
+    host = transfer_host(cfg)
     remote_dest = dest or f"/scratch/{user}/.rcac-tools/{image_path.name}"
 
-    click.echo(f"Uploading {image_path.name} to RCAC via DM node...")
-    click.echo(f"  Size: {image_path.stat().st_size / (1024**3):.1f} GB")
+    size_bytes = image_path.stat().st_size
+    click.echo(f"Uploading {image_path.name} to RCAC...")
+    click.echo(f"  Size: {size_bytes / (1024**3):.1f} GB")
+    guidance = globus_guidance(size_bytes)
+    if guidance:
+        click.echo(guidance)
 
+    # B4/AC-2.9: without -e this rsync opens its own SSH connection and costs
+    # the user a second MFA prompt. Route it through the ControlMaster.
     result = subprocess.run(
         ["rsync", "-avz", "--progress",
+         "-e", ssh_opt_str(cfg),
          str(image_path), f"{user}@{host}:{remote_dest}"],
     )
 
@@ -134,9 +132,7 @@ def run(image_path: str, command: tuple[str, ...], bind: tuple[str, ...], nv: bo
     """
     cfg = get_rcac_config()
 
-    if not cfg["ssh"]["user"]:
-        click.echo("Error: RCAC_USER not set.")
-        sys.exit(1)
+    require_user(cfg)
 
     parts = ["singularity", "exec"]
     if nv:
@@ -159,9 +155,7 @@ def list_images() -> None:
     """List Singularity images on RCAC."""
     cfg = get_rcac_config()
 
-    if not cfg["ssh"]["user"]:
-        click.echo("Error: RCAC_USER not set.")
-        sys.exit(1)
+    require_user(cfg)
 
     user = cfg["ssh"]["user"]
     result = _run_remote(cfg, f"find /scratch/{user} -name '*.sif' -printf '%s %p\\n' 2>/dev/null | sort -rn")

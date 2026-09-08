@@ -14,7 +14,8 @@ from pathlib import Path
 import click
 import yaml
 
-from .config import get_defaults, get_rcac_config
+from .config import get_defaults, get_rcac_config, require_user
+from .ssh import ssh_opt_argv, ssh_opt_str, ssh_target
 from .scheduler import (
     generate_job_array_script,
     generate_multi_gpu_script,
@@ -24,13 +25,8 @@ from .scheduler import (
 
 
 def _ssh_cmd(cfg: dict) -> list[str]:
-    ssh = cfg["ssh"]
-    return [
-        "ssh",
-        "-o", f"ControlPath={ssh['control_path']}",
-        "-p", str(ssh["port"]),
-        f"{ssh['user']}@{ssh['login_host']}",
-    ]
+    """Build base SSH command using ControlMaster."""
+    return ["ssh", *ssh_opt_argv(cfg), ssh_target(cfg)]
 
 
 def _run_remote(cfg: dict, command: str) -> subprocess.CompletedProcess:
@@ -107,9 +103,7 @@ def launch(experiment_file: str, dry_run: bool, max_jobs: int | None, partition:
     """Launch experiments from an experiment.yaml file."""
     cfg = get_rcac_config()
 
-    if not cfg["ssh"]["user"]:
-        click.echo("Error: RCAC_USER not set.")
-        sys.exit(1)
+    require_user(cfg)
 
     with open(experiment_file) as f:
         exp = yaml.safe_load(f)
@@ -312,13 +306,11 @@ def launch(experiment_file: str, dry_run: bool, max_jobs: int | None, partition:
 
 def _upload_file(cfg: dict, local_path: str, remote_path: str) -> bool:
     """Upload a file to RCAC via rsync. Returns True on success."""
-    ssh = cfg["ssh"]
-    ssh_cmd = f"ssh -o ControlPath={ssh['control_path']} -p {ssh['port']}"
     cmd = [
         "rsync", "-az",
-        "-e", ssh_cmd,
+        "-e", ssh_opt_str(cfg),
         local_path,
-        f"{ssh['user']}@{ssh['login_host']}:{remote_path}",
+        f"{ssh_target(cfg)}:{remote_path}",
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
@@ -332,9 +324,7 @@ def status() -> None:
     """Show status of all running experiments."""
     cfg = get_rcac_config()
 
-    if not cfg["ssh"]["user"]:
-        click.echo("Error: RCAC_USER not set.")
-        sys.exit(1)
+    require_user(cfg)
 
     result = _run_remote(cfg, "squeue -u $USER -o '%.10i %.30j %.8T %.10M %.6D %R' --noheader")
     if result.returncode != 0:
@@ -359,9 +349,7 @@ def logs(job_id: str) -> None:
     """Stream logs for a specific job."""
     cfg = get_rcac_config()
 
-    if not cfg["ssh"]["user"]:
-        click.echo("Error: RCAC_USER not set.")
-        sys.exit(1)
+    require_user(cfg)
 
     user = cfg["ssh"]["user"]
     result = _run_remote(cfg, f"ls -t /scratch/{user}/logs/*_{job_id}.out 2>/dev/null | head -1")
@@ -374,7 +362,6 @@ def logs(job_id: str) -> None:
     click.echo(f"Streaming: {log_file}\n")
 
     # Use SSH to tail the log
-    ssh = cfg["ssh"]
     cmd = _ssh_cmd(cfg) + [f"tail -f {log_file}"]
     try:
         subprocess.run(cmd)
@@ -391,9 +378,7 @@ def watch(project: str, auto_pull: str | None, interval: int, jobs: str | None) 
     """Watch running jobs and auto-pull results when they complete."""
     cfg = get_rcac_config()
 
-    if not cfg["ssh"]["user"]:
-        click.echo("Error: RCAC_USER not set.")
-        sys.exit(1)
+    require_user(cfg)
 
     user = cfg["ssh"]["user"]
     watch_ids = set(jobs.split(",")) if jobs else None
@@ -477,10 +462,9 @@ def _auto_pull_results(cfg: dict, project: str, local_dir: str) -> None:
     local = Path(local_dir).resolve()
     local.mkdir(parents=True, exist_ok=True)
 
-    ssh_opt = f"ssh -o ControlPath={ssh['control_path']} -p {ssh['port']}"
     cmd = [
         "rsync", "-avz", "--progress",
-        "-e", ssh_opt,
+        "-e", ssh_opt_str(cfg),
         remote,
         f"{local}/",
     ]
@@ -498,9 +482,7 @@ def cancel(job_id: str) -> None:
     """Cancel a specific job or all jobs."""
     cfg = get_rcac_config()
 
-    if not cfg["ssh"]["user"]:
-        click.echo("Error: RCAC_USER not set.")
-        sys.exit(1)
+    require_user(cfg)
 
     if job_id == "all":
         result = _run_remote(cfg, "scancel -u $USER")

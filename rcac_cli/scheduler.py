@@ -9,8 +9,13 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 
 def get_template_dir() -> Path:
-    """Return the templates directory path."""
-    return Path(__file__).parent.parent / "templates"
+    """Return the packaged templates directory.
+
+    Templates live *inside* the package (``rcac_cli/templates/``) so they ship
+    in the wheel; before this they sat next to it in the source tree and were
+    silently excluded from every install (B3/R2).
+    """
+    return Path(__file__).resolve().parent / "templates"
 
 
 def render_slurm_script(

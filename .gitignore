@@ -23,6 +23,9 @@
 
 # Python
 .DS_Store
+# `python -m build` output. The C2 packaging gate builds a wheel, and an
+# untracked dist/ would otherwise dirty every subsequent `git status`.
+dist/
 **/*.egg-info/
 **/__pycache__/
 **/.pytest_cache/

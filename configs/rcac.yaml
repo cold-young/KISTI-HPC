@@ -1,17 +1,39 @@
-# RCAC HPC 접속 설정
+# Purdue RCAC Gilbreth connection settings.
+#
+# Credentials are NEVER committed. This file ships with placeholders; the
+# documented primary path is the environment, which requires no file edit:
+#
+#     export RCAC_USER=<your Purdue career account id>
+#     export RCAC_ACCOUNT=<your Slurm account / queue name>
+#
+# The environment always wins over a value written here.
+
 ssh:
-  login_host: neuron.ksc.re.kr
-  dm_host: neuron-dm.ksc.re.kr
-  user: "YOUR_ID"  
+  login_host: gilbreth.rcac.purdue.edu
+  # Gilbreth has no documented data-transfer node. Bulk data moves over
+  # Globus (transfer.rcac.purdue.edu, "Gilbreth Cluster Collection");
+  # small and medium transfers go over the login host above.
+  user: "YOUR_PURDUE_ID"
   port: 22
   control_persist: "4h"
   control_path: "~/.ssh/sockets/%r@%h-%p"
   server_alive_interval: 60
   server_alive_count_max: 10
 
-# 원격 경로 설정
+slurm:
+  # Gilbreth requires -A on every submission. Run `slist` on the cluster to
+  # see the accounts you belong to.
+  account: "YOUR_QUEUE"
+
+# Remote paths. "{user}" is a template, not a value: it is substituted at
+# point of use by rcac_cli.config.resolve_path() / scratch_root(), which
+# raise an actionable error when the user is still unresolved.
 paths:
-  scratch: "/scratch/{user}"
-  projects: "/scratch/{user}/projects"
-  data: "/scratch/{user}/data"
-  logs: "/scratch/{user}/logs"
+  scratch: "/scratch/gilbreth/{user}"
+  projects: "/scratch/gilbreth/{user}/projects"
+  data: "/scratch/gilbreth/{user}/data"
+  logs: "/scratch/gilbreth/{user}/logs"
+  # paths.depot is OPTIONAL and intentionally left unset: the /depot/<group>
+  # convention is undocumented for Gilbreth. Every code path tolerates its
+  # absence (AC-2.13). To use it, uncomment and fill in from `ls -d /depot/*/`:
+  # depot: "/depot/YOUR_GROUP"

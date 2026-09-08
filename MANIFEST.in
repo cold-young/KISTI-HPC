@@ -1,0 +1,9 @@
+# Sources that are data, not code. Without these the sdist ships a package
+# that cannot render a single SLURM script (B3/R2).
+include README.md
+include README.ko.md
+include LICENSE
+recursive-include rcac_cli/templates *.j2
+recursive-include rcac_cli/configs *.yaml
+recursive-include examples *.yaml
+recursive-include containers *.def

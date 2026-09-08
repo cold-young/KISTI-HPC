@@ -8,20 +8,15 @@ from pathlib import Path
 import click
 import yaml
 
-from .config import get_defaults, get_rcac_config
+from .config import get_defaults, get_rcac_config, require_user
+from .ssh import ssh_opt_argv, ssh_opt_str, ssh_target
 
 CONDA_BIN = "/apps/applications/Miniconda/25.11.1/bin/conda"
 
 
 def _ssh_cmd(cfg: dict) -> list[str]:
     """Build base SSH command using ControlMaster."""
-    ssh = cfg["ssh"]
-    return [
-        "ssh",
-        "-o", f"ControlPath={ssh['control_path']}",
-        "-p", str(ssh["port"]),
-        f"{ssh['user']}@{ssh['login_host']}",
-    ]
+    return ["ssh", *ssh_opt_argv(cfg), ssh_target(cfg)]
 
 
 def _run_remote(cfg: dict, command: str) -> subprocess.CompletedProcess:
@@ -49,9 +44,7 @@ def setup(from_file: str, name: str) -> None:
     cfg = get_rcac_config()
     defaults = get_defaults()
 
-    if not cfg["ssh"]["user"]:
-        click.echo("Error: RCAC_USER not set.")
-        sys.exit(1)
+    require_user(cfg)
 
     local_file = Path(from_file)
     if not local_file.exists():
@@ -67,8 +60,11 @@ def setup(from_file: str, name: str) -> None:
     # Upload environment.yml to RCAC
     click.echo("Uploading environment file...")
     _run_remote(cfg, f"mkdir -p /scratch/{user}/.rcac-tools")
-    ssh_opt = f"ssh -o ControlPath={ssh['control_path']} -p {ssh['port']}"
-    rsync_cmd = ["rsync", "-az", "-e", ssh_opt, str(local_file), f"{user}@{host}:{remote_tmp}"]
+    rsync_cmd = [
+        "rsync", "-az",
+        "-e", ssh_opt_str(cfg),
+        str(local_file), f"{user}@{host}:{remote_tmp}",
+    ]
     result = subprocess.run(rsync_cmd, capture_output=True, text=True)
     if result.returncode != 0:
         click.echo(f"Error uploading file: {result.stderr}", err=True)
@@ -141,9 +137,7 @@ def export(env_name: str, output: str) -> None:
     cfg = get_rcac_config()
     defaults = get_defaults()
 
-    if not cfg["ssh"]["user"]:
-        click.echo("Error: RCAC_USER not set.")
-        sys.exit(1)
+    require_user(cfg)
 
     conda = _get_conda_path(defaults)
     remote_cmd = f"{conda} env export --name {shlex.quote(env_name)} --no-builds"
@@ -163,9 +157,7 @@ def list_envs() -> None:
     cfg = get_rcac_config()
     defaults = get_defaults()
 
-    if not cfg["ssh"]["user"]:
-        click.echo("Error: RCAC_USER not set.")
-        sys.exit(1)
+    require_user(cfg)
 
     conda = _get_conda_path(defaults)
     result = _run_remote(cfg, f"{conda} env list")
@@ -192,9 +184,7 @@ def list_modules() -> None:
     """Show available pre-built conda module environments on RCAC."""
     cfg = get_rcac_config()
 
-    if not cfg["ssh"]["user"]:
-        click.echo("Error: RCAC_USER not set.")
-        sys.exit(1)
+    require_user(cfg)
 
     click.echo("Available pre-built environments (module load):\n")
     result = _run_remote(cfg, "module avail conda 2>&1")

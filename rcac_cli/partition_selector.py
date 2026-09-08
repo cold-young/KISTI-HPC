@@ -8,7 +8,8 @@ import sys
 
 import click
 
-from .config import get_rcac_config
+from .config import get_rcac_config, require_user
+from .ssh import ssh_opt_argv, ssh_target
 
 # Partition specs: (gpu_type, gpus_per_node, cores, relative_perf, cost_tier)
 PARTITION_INFO = {
@@ -22,14 +23,7 @@ PARTITION_INFO = {
 
 
 def _run_remote(cfg: dict, command: str) -> subprocess.CompletedProcess:
-    ssh = cfg["ssh"]
-    cmd = [
-        "ssh",
-        "-o", f"ControlPath={ssh['control_path']}",
-        "-p", str(ssh["port"]),
-        f"{ssh['user']}@{ssh['login_host']}",
-        command,
-    ]
+    cmd = ["ssh", *ssh_opt_argv(cfg), ssh_target(cfg), command]
     return subprocess.run(cmd, capture_output=True, text=True)
 
 
@@ -142,9 +136,7 @@ def select_partition(gpus: int, prefer_cost: bool) -> None:
     """Recommend the best partition based on current queue status."""
     cfg = get_rcac_config()
 
-    if not cfg["ssh"]["user"]:
-        click.echo("Error: RCAC_USER not set.")
-        sys.exit(1)
+    require_user(cfg)
 
     click.echo(f"Analyzing partitions for {gpus} GPU(s)...\n")
 

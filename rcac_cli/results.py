@@ -5,23 +5,18 @@ from __future__ import annotations
 import csv
 import json
 import subprocess
-import sys
 from io import StringIO
 from pathlib import Path
 
 import click
 
-from .config import get_rcac_config
+from .config import get_rcac_config, require_user
+from .ssh import ssh_opt_argv, ssh_opt_str, ssh_target
 
 
 def _ssh_cmd(cfg: dict) -> list[str]:
-    ssh = cfg["ssh"]
-    return [
-        "ssh",
-        "-o", f"ControlPath={ssh['control_path']}",
-        "-p", str(ssh["port"]),
-        f"{ssh['user']}@{ssh['login_host']}",
-    ]
+    """Build base SSH command using ControlMaster."""
+    return ["ssh", *ssh_opt_argv(cfg), ssh_target(cfg)]
 
 
 def _run_remote(cfg: dict, command: str) -> subprocess.CompletedProcess:
@@ -97,9 +92,7 @@ def results(project: str, sort: str | None, limit: int) -> None:
     """Show all experiment results for a project."""
     cfg = get_rcac_config()
 
-    if not cfg["ssh"]["user"]:
-        click.echo("Error: RCAC_USER not set.")
-        sys.exit(1)
+    require_user(cfg)
 
     data = _fetch_experiment_results(cfg, project)
     if not data:
@@ -137,9 +130,7 @@ def compare(project: str, exp_ids: tuple[str, ...]) -> None:
     """Compare specific experiments side by side."""
     cfg = get_rcac_config()
 
-    if not cfg["ssh"]["user"]:
-        click.echo("Error: RCAC_USER not set.")
-        sys.exit(1)
+    require_user(cfg)
 
     data = _fetch_experiment_results(cfg, project)
     if not data:
@@ -179,9 +170,7 @@ def best(project: str, metric: str, top: int) -> None:
     """Show top-performing experiments."""
     cfg = get_rcac_config()
 
-    if not cfg["ssh"]["user"]:
-        click.echo("Error: RCAC_USER not set.")
-        sys.exit(1)
+    require_user(cfg)
 
     data = _fetch_experiment_results(cfg, project)
     if not data:
@@ -219,13 +208,9 @@ def sync_wandb(project: str, exp_id: str | None) -> None:
     """Download W&B offline runs from RCAC and sync locally."""
     cfg = get_rcac_config()
 
-    if not cfg["ssh"]["user"]:
-        click.echo("Error: RCAC_USER not set.")
-        sys.exit(1)
+    require_user(cfg)
 
     user = cfg["ssh"]["user"]
-    host = cfg["ssh"]["login_host"]
-    ssh = cfg["ssh"]
     remote_wandb = f"/scratch/{user}/projects/{project}/wandb"
 
     if exp_id:
@@ -235,9 +220,12 @@ def sync_wandb(project: str, exp_id: str | None) -> None:
     local_wandb.mkdir(parents=True, exist_ok=True)
 
     click.echo(f"Downloading W&B runs from RCAC...")
+    # B4/AC-2.9: without -e this rsync opens its own SSH connection and
+    # costs the user a second MFA prompt. Route it through the ControlMaster.
     cmd = [
         "rsync", "-avz", "--progress",
-        f"{user}@{host}:{remote_wandb}/",
+        "-e", ssh_opt_str(cfg),
+        f"{ssh_target(cfg)}:{remote_wandb}/",
         str(local_wandb) + "/",
     ]
     result = subprocess.run(cmd)

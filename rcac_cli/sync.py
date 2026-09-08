@@ -9,7 +9,8 @@ from pathlib import Path
 
 import click
 
-from .config import get_defaults, get_rcac_config
+from .config import get_defaults, get_rcac_config, require_user, resolve_path
+from .ssh import globus_guidance, ssh_opt_str, transfer_host
 
 
 def _build_exclude_args(defaults: dict) -> list[str]:
@@ -28,11 +29,29 @@ def _build_include_args(defaults: dict) -> list[str]:
     return args
 
 
+def _tree_size(path: Path) -> int:
+    """Total bytes of a file or of every regular file under a directory.
+
+    Used only to decide whether to print the Globus guidance (AC-2.5), so a
+    file that vanishes mid-walk is skipped rather than raising.
+    """
+    if path.is_file():
+        return path.stat().st_size
+    total = 0
+    for child in path.rglob("*"):
+        try:
+            if child.is_file() and not child.is_symlink():
+                total += child.stat().st_size
+        except OSError:
+            continue
+    return total
+
+
 def _get_remote_path(cfg: dict, project: str) -> str:
     """Build remote project path."""
     user = cfg["ssh"]["user"]
     host = cfg["ssh"]["login_host"]
-    project_dir = cfg["paths"]["projects"] + f"/{project}/"
+    project_dir = resolve_path(cfg, "projects") + f"/{project}/"
     return f"{user}@{host}:{project_dir}"
 
 
@@ -43,8 +62,7 @@ def _detect_project_name(local_path: Path) -> str:
 
 def _build_ssh_option(cfg: dict) -> str:
     """Build SSH command string for rsync -e option."""
-    ssh = cfg["ssh"]
-    return f"ssh -o ControlPath={ssh['control_path']} -p {ssh['port']}"
+    return ssh_opt_str(cfg)
 
 
 def _run_rsync(args: list[str], cfg: dict | None = None, dry_run: bool = False) -> int:
@@ -74,9 +92,7 @@ def push(local_path: str, project: str | None, dry_run: bool, delete: bool) -> N
     cfg = get_rcac_config()
     defaults = get_defaults()
 
-    if not cfg["ssh"]["user"]:
-        click.echo("Error: RCAC_USER not set.")
-        sys.exit(1)
+    require_user(cfg)
 
     local = Path(local_path).resolve()
     project = project or _detect_project_name(local)
@@ -107,9 +123,7 @@ def pull(local_path: str, project: str | None, all_files: bool, dry_run: bool) -
     cfg = get_rcac_config()
     defaults = get_defaults()
 
-    if not cfg["ssh"]["user"]:
-        click.echo("Error: RCAC_USER not set.")
-        sys.exit(1)
+    require_user(cfg)
 
     local = Path(local_path).resolve()
     project = project or _detect_project_name(local)
@@ -144,9 +158,7 @@ def watch(local_path: str, project: str | None, interval: float) -> None:
     cfg = get_rcac_config()
     defaults = get_defaults()
 
-    if not cfg["ssh"]["user"]:
-        click.echo("Error: RCAC_USER not set.")
-        sys.exit(1)
+    require_user(cfg)
 
     local = Path(local_path).resolve()
     project = project or _detect_project_name(local)
@@ -205,23 +217,27 @@ def watch(local_path: str, project: str | None, interval: float) -> None:
 
 @cli.command("push-data")
 @click.argument("local_data_path", type=click.Path(exists=True))
-@click.option("--via", type=click.Choice(["dm", "login"]), default="dm", help="Transfer via DM or login node")
 @click.option("--dry-run", is_flag=True)
-def push_data(local_data_path: str, via: str, dry_run: bool) -> None:
-    """Push large data to RCAC via DM node (no CPU limit)."""
+def push_data(local_data_path: str, dry_run: bool) -> None:
+    """Push large data to RCAC (use Globus for bulk transfers)."""
+    # The old --via flag chose between a login node and a data-transfer node.
+    # Gilbreth documents no transfer node, so the flag went with the config key
+    # that fed it: there is exactly one direct route, and Globus for anything
+    # bulky (AC-2.5). Leaving the flag as a one-choice no-op would have implied
+    # a choice the cluster does not offer.
     cfg = get_rcac_config()
+    user = require_user(cfg)
 
-    if not cfg["ssh"]["user"]:
-        click.echo("Error: RCAC_USER not set.")
-        sys.exit(1)
-
-    user = cfg["ssh"]["user"]
-    host = cfg["ssh"]["dm_host"] if via == "dm" else cfg["ssh"]["login_host"]
-    data_dir = cfg["paths"]["data"]
+    host = transfer_host(cfg)
+    data_dir = resolve_path(cfg, "data")
     remote = f"{user}@{host}:{data_dir}/"
 
     local = Path(local_data_path).resolve()
-    click.echo(f"Pushing data {local}/ -> {remote} (via {via} node)")
+    click.echo(f"Pushing data {local}/ -> {remote}")
+
+    guidance = globus_guidance(_tree_size(local))
+    if guidance:
+        click.echo(guidance)
 
     args = [f"{local}/", remote]
     rc = _run_rsync(args, cfg=cfg, dry_run=dry_run)

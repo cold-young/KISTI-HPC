@@ -13,7 +13,8 @@ from pathlib import Path
 import click
 import yaml
 
-from .config import get_defaults, get_rcac_config
+from .config import get_defaults, get_rcac_config, require_user
+from .ssh import ssh_opt_argv, ssh_target
 
 # Simulator compatibility matrix with RCAC GPUs
 SIMULATOR_COMPAT = {
@@ -76,14 +77,7 @@ PARTITION_GPU = {
 
 
 def _run_remote(cfg: dict, command: str) -> subprocess.CompletedProcess:
-    ssh = cfg["ssh"]
-    cmd = [
-        "ssh",
-        "-o", f"ControlPath={ssh['control_path']}",
-        "-p", str(ssh["port"]),
-        f"{ssh['user']}@{ssh['login_host']}",
-        command,
-    ]
+    cmd = ["ssh", *ssh_opt_argv(cfg), ssh_target(cfg), command]
     return subprocess.run(cmd, capture_output=True, text=True)
 
 
@@ -175,9 +169,7 @@ def check_env(simulator: str) -> None:
     """Verify simulator is installed on RCAC."""
     cfg = get_rcac_config()
 
-    if not cfg["ssh"]["user"]:
-        click.echo("Error: RCAC_USER not set.")
-        sys.exit(1)
+    require_user(cfg)
 
     sim = SIMULATOR_COMPAT[simulator]
     pkg = sim["pip_package"]
