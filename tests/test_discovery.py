@@ -36,7 +36,6 @@ from rcac_cli.discovery import (
     ClusterView,
     ProbeResult,
     SlistMatrix,
-    parse_modules,
     parse_purgelist,
     parse_sfeatures,
     parse_sinfo,
@@ -54,7 +53,6 @@ FIXTURE_NAMES = (
     "slist.txt",
     "sinfo.txt",
     "sfeatures.txt",
-    "modules.txt",
     "myquota.txt",
     "purgelist.txt",
 )
@@ -183,10 +181,6 @@ def test_slist_na_cells_are_unreported_not_zero():
     assert "a30" not in account1.counts
     assert account1.free("a30") is None
     assert account1.total("a30") is None
-    # ...and the difference survives into the aggregate: an account with no
-    # allocation contributes nothing rather than a zero that looks like a
-    # measurement.
-    assert matrix.accounts_for("a30") == ("account3",)
 
 
 @pytest.mark.unverified_fixture
@@ -201,7 +195,6 @@ def test_slist_carries_the_h100_column_through():
     matrix = parse_slist(load_fixture("slist.txt"))
 
     assert "h100" in matrix.partitions
-    assert matrix.accounts_for("h100") == ("account3",)
     assert matrix.free("h100") == 11
     assert PARTITION_HINTS["h100"]["verified"] is False
 
@@ -213,7 +206,6 @@ def test_slist_free_sums_over_every_chargeable_account():
     assert matrix.free("a10") == 2  # account1 and account3, one each
     assert matrix.free("a100-80gb") == 11  # account2 only
     assert matrix.free("training") == 0  # not a column here at all
-    assert matrix.accounts_for("a10") == ("account1", "account3")
 
 
 @pytest.mark.unverified_fixture
@@ -598,69 +590,6 @@ def test_sfeatures_rejects_a_token_that_cannot_be_a_feature_name():
 
 
 # --------------------------------------------------------------------------
-# module avail
-# --------------------------------------------------------------------------
-
-
-@pytest.mark.unverified_fixture
-def test_modules_keeps_versioned_names():
-    """AC-5.8: the CLI may only name a module the cluster listed.
-
-    **Defect fixed in this commit.**  ``parse_modules`` validated names with the
-    *feature-name* pattern, which has no ``/`` in its character class, so every
-    ``name/version`` token failed it.  A real ``module avail`` parsed down to
-    the handful of unversioned modules and dropped the rest -- silently, and in
-    the direction that matters: the version is exactly the part AC-5.2 forbids
-    guessing.
-    """
-    names = parse_modules(load_fixture("modules.txt"))
-
-    assert names == (
-        "anaconda/2024.02-py311",
-        "cudnn/cuda-12.6_9.5",
-        "openmpi/4.1.6",
-        "apptainer/1.3.4",
-        "gcc/12.3.0",
-        "use.own",
-        "cuda/12.6.0",
-        "gcc/11.2.0",
-        "conda-env/rl-py3.11",
-    )
-
-
-@pytest.mark.unverified_fixture
-def test_modules_returns_nothing_that_is_not_a_module():
-    """Directory banners, the ``Where:`` legend and the footers are not modules.
-
-    **Defect fixed in this commit** for the legend body: the guard covered the
-    ``Where:`` line but not the ``D:  Default Module`` entries beneath it, so
-    ``Default`` and ``Module`` were returned as loadable module names -- the
-    precise failure AC-5.8 exists to prevent, since the CLI would then print
-    ``module load Default``.
-    """
-    names = parse_modules(load_fixture("modules.txt"))
-
-    assert not any(name.startswith("/") for name in names)
-    for junk in ("Where:", "D:", "L:", "Default", "Module", "is", "loaded", "any"):
-        assert junk not in names
-
-
-def test_modules_strips_lmod_decorations_without_duplicating():
-    text = "   cuda/12.6.0 (D)   cuda/12.4.0   gcc/12.3.0(L)   gcc/12.3.0\n"
-    assert parse_modules(text) == ("cuda/12.6.0", "cuda/12.4.0", "gcc/12.3.0")
-
-
-def test_modules_blank_input_is_an_empty_tuple():
-    assert parse_modules("") == ()
-    assert parse_modules("\n----------\n\n") == ()
-
-
-def test_modules_ignores_the_directory_banner():
-    text = "------- /apps/spack/modules -------\n   gcc/12.3.0\n"
-    assert parse_modules(text) == ("gcc/12.3.0",)
-
-
-# --------------------------------------------------------------------------
 # parse_table -- myquota and anything else shown to a human
 # --------------------------------------------------------------------------
 
@@ -794,7 +723,6 @@ PARSERS = (
     parse_slist,
     parse_sinfo,
     parse_sfeatures,
-    parse_modules,
     parse_table,
     parse_purgelist,
 )

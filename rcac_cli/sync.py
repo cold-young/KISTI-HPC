@@ -60,16 +60,11 @@ def _detect_project_name(local_path: Path) -> str:
     return local_path.resolve().name
 
 
-def _build_ssh_option(cfg: dict) -> str:
-    """Build SSH command string for rsync -e option."""
-    return ssh_opt_str(cfg)
-
-
 def _run_rsync(args: list[str], cfg: dict | None = None, dry_run: bool = False) -> int:
     """Execute rsync with given arguments."""
     cmd = ["rsync", "-avz", "--progress"]
     if cfg:
-        cmd.extend(["-e", _build_ssh_option(cfg)])
+        cmd.extend(["-e", ssh_opt_str(cfg)])
     if dry_run:
         cmd.append("--dry-run")
     cmd.extend(args)
@@ -191,8 +186,7 @@ def watch(local_path: str, project: str | None, interval: float) -> None:
                 self._pending = False
                 self._last_sync = now
                 args = exclude_args + [f"{local}/", remote]
-                ssh_opt = _build_ssh_option(cfg)
-                cmd = ["rsync", "-avz", "--quiet", "-e", ssh_opt] + args
+                cmd = ["rsync", "-avz", "--quiet", "-e", ssh_opt_str(cfg)] + args
                 result = subprocess.run(cmd, capture_output=True, text=True)
                 ts = time.strftime("%H:%M:%S")
                 if result.returncode == 0:

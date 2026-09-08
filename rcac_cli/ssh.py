@@ -43,9 +43,8 @@ def ssh_options(cfg: dict) -> list[tuple[str, str]]:
 def ssh_opt_argv(cfg: dict) -> list[str]:
     """Options and port as argv fragments, for a list passed to ``subprocess``.
 
-    Callers append the target and any remote command::
-
-        cmd = ["ssh", *ssh_opt_argv(cfg), ssh_target(cfg), command]
+    :func:`ssh_cmd` composes this with the target; prefer it over rebuilding
+    the prefix by hand.
     """
     argv: list[str] = []
     for key, value in ssh_options(cfg):
@@ -70,6 +69,19 @@ def ssh_target(cfg: dict) -> str:
     """``user@host`` for the Gilbreth login node."""
     ssh = cfg["ssh"]
     return f"{ssh['user']}@{ssh['login_host']}"
+
+
+def ssh_cmd(cfg: dict) -> list[str]:
+    """The ``ssh`` argv prefix: the binary, the options, and the target.
+
+    Four modules each carried a private copy of this three-element list, so a
+    change to the prefix meant four edits and the copies could drift the way
+    the option strings this module exists to unify once did.  Callers append
+    the remote command::
+
+        subprocess.run([*ssh_cmd(cfg), command], capture_output=True)
+    """
+    return ["ssh", *ssh_opt_argv(cfg), ssh_target(cfg)]
 
 
 def transfer_host(cfg: dict) -> str:

@@ -45,7 +45,7 @@ import click
 
 from .config import CredentialError, get_rcac_config, require_account, require_user, scratch_root
 from .gilbreth import build_directives
-from .ssh import globus_guidance, ssh_opt_argv, ssh_opt_str, ssh_target, transfer_host
+from .ssh import globus_guidance, ssh_cmd, ssh_opt_str, transfer_host
 
 #: The allocation a *fallback* interactive build asks for, if the rootless
 #: front-end build turns out to need one (plan row L17).  `a10` is the smallest
@@ -64,13 +64,8 @@ BUILD_FALLBACK_TIME = "02:00:00"
 ACCOUNT_PLACEHOLDER = "YOUR_ACCOUNT"
 
 
-def _ssh_cmd(cfg: dict) -> list[str]:
-    """Build base SSH command using ControlMaster."""
-    return ["ssh", *ssh_opt_argv(cfg), ssh_target(cfg)]
-
-
 def _run_remote(cfg: dict, command: str) -> subprocess.CompletedProcess:
-    cmd = _ssh_cmd(cfg) + [command]
+    cmd = [*ssh_cmd(cfg), command]
     return subprocess.run(cmd, capture_output=True, text=True)
 
 

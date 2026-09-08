@@ -14,7 +14,6 @@ import click
 import yaml
 
 from .config import (
-    get_defaults,
     get_rcac_config,
     require_account,
     require_user,
@@ -28,7 +27,7 @@ from .gilbreth import (
     build_directives,
     emit_warnings,
 )
-from .ssh import ssh_opt_argv, ssh_target
+from .ssh import ssh_cmd
 
 # Simulator compatibility matrix for Gilbreth's GPUs.
 #
@@ -134,7 +133,7 @@ GENERATED_MANIFEST_HEADER = (
 
 
 def _run_remote(cfg: dict, command: str) -> subprocess.CompletedProcess:
-    cmd = ["ssh", *ssh_opt_argv(cfg), ssh_target(cfg), command]
+    cmd = [*ssh_cmd(cfg), command]
     return subprocess.run(cmd, capture_output=True, text=True)
 
 
@@ -182,27 +181,6 @@ def check_compatibility(simulator: str, partition: str) -> dict:
         "gpu": gpu_type,
         "container": sim["container"],
     }
-
-
-def generate_datagen_config(
-    simulator: str,
-    env_name: str,
-    num_episodes: int = 10000,
-    output_dir: str = "generated_data",
-    extra_args: dict | None = None,
-) -> dict:
-    """Generate a data generation configuration for a simulator."""
-    config = {
-        "simulator": simulator,
-        "env_name": env_name,
-        "num_episodes": num_episodes,
-        "output_dir": output_dir,
-        "render": False,  # headless on HPC
-        "num_envs": 256,  # parallel environments
-    }
-    if extra_args:
-        config.update(extra_args)
-    return config
 
 
 @click.group()
@@ -398,7 +376,7 @@ def init_pipeline(simulator: str, env_name: str, episodes: int, output: str, par
         yaml.dump(experiment, f, default_flow_style=False, sort_keys=False)
 
     click.echo(f"Pipeline experiment file created: {output}")
-    click.echo(f"\nPipeline stages:")
+    click.echo("\nPipeline stages:")
     for i, stage in enumerate(experiment["pipeline"], 1):
         dep = f" (after: {stage['depends_on']})" if stage.get("depends_on") else ""
         click.echo(f"  {i}. {stage['name']}: {stage['script']}{dep}")

@@ -10,7 +10,7 @@ from . import discovery
 from .config import get_rcac_config, require_account, require_user, scratch_root
 from .gilbreth import emit_warnings
 from .scheduler import generate_keepalive_script
-from .ssh import ssh_opt_argv, ssh_target
+from .ssh import ssh_cmd
 
 # --------------------------------------------------------------------------
 # The retention policy this module exists to work against (AC-6.1)
@@ -110,7 +110,7 @@ KEEPALIVE_PATTERNS = [
 
 
 def _run_remote(cfg: dict, command: str) -> subprocess.CompletedProcess:
-    cmd = ["ssh", *ssh_opt_argv(cfg), ssh_target(cfg), command]
+    cmd = [*ssh_cmd(cfg), command]
     return subprocess.run(cmd, capture_output=True, text=True)
 
 

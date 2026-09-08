@@ -2,25 +2,18 @@
 
 from __future__ import annotations
 
-import csv
 import json
 import subprocess
-from io import StringIO
 from pathlib import Path
 
 import click
 
 from .config import get_rcac_config, require_user, scratch_root
-from .ssh import ssh_opt_argv, ssh_opt_str, ssh_target
-
-
-def _ssh_cmd(cfg: dict) -> list[str]:
-    """Build base SSH command using ControlMaster."""
-    return ["ssh", *ssh_opt_argv(cfg), ssh_target(cfg)]
+from .ssh import ssh_cmd, ssh_opt_str, ssh_target
 
 
 def _run_remote(cfg: dict, command: str) -> subprocess.CompletedProcess:
-    cmd = _ssh_cmd(cfg) + [command]
+    cmd = [*ssh_cmd(cfg), command]
     return subprocess.run(cmd, capture_output=True, text=True)
 
 
@@ -217,7 +210,7 @@ def sync_wandb(project: str, exp_id: str | None) -> None:
     local_wandb = Path(f"./wandb_sync/{project}")
     local_wandb.mkdir(parents=True, exist_ok=True)
 
-    click.echo(f"Downloading W&B runs from RCAC...")
+    click.echo("Downloading W&B runs from RCAC...")
     # B4/AC-2.9: without -e this rsync opens its own SSH connection and
     # costs the user a second MFA prompt. Route it through the ControlMaster.
     cmd = [

@@ -50,7 +50,7 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import Callable, Optional, Sequence
 
-from .ssh import ssh_opt_argv, ssh_target
+from .ssh import ssh_cmd
 
 # --------------------------------------------------------------------------
 # The probe commands
@@ -78,9 +78,6 @@ SINFO_COMMAND = "sinfo -a -o '%P %a %D %T %N %G' --noheader"
 #: whether ``nvlink`` is a real feature name on this cluster -- so its parser is
 #: the most tolerant of the three.
 SFEATURES_COMMAND = "sfeatures"
-
-#: Lmod's module list.  ``2>&1`` because Lmod writes it to stderr.
-MODULES_COMMAND = "module avail 2>&1"
 
 #: RCAC's quota reporter.
 QUOTA_COMMAND = "myquota"
@@ -201,7 +198,7 @@ def _run_remote(
     warning, but the reason strings differ and the reason is the whole value of
     a failed probe.
     """
-    argv = ["ssh", *ssh_opt_argv(cfg), ssh_target(cfg), command]
+    argv = [*ssh_cmd(cfg), command]
     try:
         return subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
     except (OSError, subprocess.SubprocessError):
@@ -361,12 +358,6 @@ class SlistMatrix:
     @property
     def account_names(self) -> tuple:
         return tuple(row.account for row in self.accounts)
-
-    def accounts_for(self, partition: str) -> tuple:
-        """Accounts holding a non-zero total in *partition*."""
-        return tuple(
-            row.account for row in self.accounts if (row.total(partition) or 0) > 0
-        )
 
     def free(self, partition: str) -> int:
         """Free GPUs in *partition* summed over every account we can charge."""
@@ -790,64 +781,8 @@ def discover_features(
 
 
 # --------------------------------------------------------------------------
-# The remaining probes: modules, quota, purge
+# The remaining probes: quota, purge
 # --------------------------------------------------------------------------
-
-#: Lmod decorations on a module name: ``(D)`` default, ``(L)`` loaded, and the
-#: rest.  Stripped so a name can be pasted into ``module load`` unedited.
-_LMOD_DECORATION_RE = re.compile(r"\((?:[A-Za-z,]+)\)$")
-
-#: A module name as Lmod prints it.  ``/`` separates name from version and is
-#: the whole point: reusing :data:`_FEATURE_RE` here rejected every *versioned*
-#: name, so a real ``module avail`` parsed to the handful of unversioned modules
-#: and dropped the rest -- silently, and in the direction AC-5.8 cares about.
-_MODULE_NAME_RE = re.compile(r"^[A-Za-z][\w.:+-]*(?:/[\w.:+-]+)*$")
-
-#: Lmod's key legend, printed under ``Where:`` as ``D:  Default Module``.  The
-#: existing prose guard covers the ``Where:`` line itself but not the entries
-#: beneath it, whose words would otherwise be returned as module names.
-_LMOD_LEGEND_RE = re.compile(r"^[A-Za-z]{1,3}:\s")
-
-
-def parse_modules(text: str) -> tuple:
-    """Parse ``module avail`` into the module names Lmod actually printed.
-
-    The names are the product: AC-5.8's whole point is that the CLI must never
-    print a ``module load`` line for a module the cluster did not list.
-    """
-    names: list = []
-    for line in text.splitlines():
-        stripped = line.strip()
-        if not stripped or _is_rule(line):
-            continue
-        # Lmod's directory banners: `--- /apps/modulefiles ---`.
-        if stripped.startswith("-") and stripped.endswith("-"):
-            continue
-        if stripped.lower().startswith(("use ", "where:", "note:", "if the ")):
-            continue
-        if _LMOD_LEGEND_RE.match(stripped):
-            continue
-        for token in stripped.split():
-            name = _LMOD_DECORATION_RE.sub("", token)
-            if name and _MODULE_NAME_RE.match(name) and name not in names:
-                names.append(name)
-    return tuple(names)
-
-
-def discover_modules(
-    cfg: dict, *, no_discover: bool = False, no_cache: bool = False
-) -> ProbeResult:
-    """``module avail``.  ``value`` is a tuple of module names."""
-    return probe(
-        cfg,
-        name="modules",
-        command=MODULES_COMMAND,
-        parser=parse_modules,
-        empty=(),
-        no_discover=no_discover,
-        no_cache=no_cache,
-    )
-
 
 @dataclass(frozen=True)
 class TableRow:

@@ -112,19 +112,6 @@ def resolve_config_path(name: str) -> Path:
     )
 
 
-def get_config_dir() -> Path:
-    """Directory the default config resolves out of.
-
-    Kept as the answer to "where is my config?" for error messages; the
-    per-file :func:`resolve_config_path` is what the loader uses, so a partial
-    override directory does not have to shadow every file.
-    """
-    for directory in config_search_path():
-        if directory.is_dir():
-            return directory
-    return config_search_path()[-1]
-
-
 def load_config(name: str = "rcac") -> dict:
     """Load a YAML config file from the resolved config directory."""
     with open(resolve_config_path(name)) as f:

@@ -30,7 +30,7 @@ from .config import (
     scratch_root,
 )
 from .gilbreth import DEFAULT_QOS, emit_warnings
-from .ssh import ssh_opt_argv, ssh_opt_str, ssh_target
+from .ssh import ssh_cmd, ssh_opt_str, ssh_target
 # B6/AC-3.16: `generate_job_array_script` was imported here and never called.
 # `rcac-exp launch` submits a sweep as N independent jobs, not as one array, so
 # the import was dead. The generator itself is still real and tested in
@@ -121,11 +121,6 @@ def _normalise_slurm(source: dict | None, origin: str, warnings: list) -> dict:
     return out
 
 
-def _ssh_cmd(cfg: dict) -> list[str]:
-    """Build base SSH command using ControlMaster."""
-    return ["ssh", *ssh_opt_argv(cfg), ssh_target(cfg)]
-
-
 def _run_remote(cfg: dict, command: str) -> subprocess.CompletedProcess:
     """Run *command* on the login host.
 
@@ -137,7 +132,7 @@ def _run_remote(cfg: dict, command: str) -> subprocess.CompletedProcess:
     command this module sends uses absolute paths, so the wrapper is dropped
     rather than re-pointed at a directory that may not exist yet.
     """
-    cmd = _ssh_cmd(cfg) + [command]
+    cmd = [*ssh_cmd(cfg), command]
     return subprocess.run(cmd, capture_output=True, text=True)
 
 
@@ -182,14 +177,6 @@ def _generate_sweep_configs(sweep: dict, base_params: dict) -> list[dict]:
         configs.append(cfg)
 
     return configs
-
-
-def _write_config_file(config: dict, config_dir: Path, index: int) -> Path:
-    """Write a single experiment config to YAML file."""
-    config_path = config_dir / f"config_{index:03d}.yaml"
-    with open(config_path, "w") as f:
-        yaml.dump(config, f, default_flow_style=False)
-    return config_path
 
 
 @click.group()
@@ -631,7 +618,7 @@ def logs(job_id: str) -> None:
     click.echo(f"Streaming: {log_file}\n")
 
     # Use SSH to tail the log
-    cmd = _ssh_cmd(cfg) + [f"tail -f {log_file}"]
+    cmd = ssh_cmd(cfg) + [f"tail -f {log_file}"]
     try:
         subprocess.run(cmd)
     except KeyboardInterrupt:

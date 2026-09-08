@@ -45,7 +45,7 @@ import click
 import yaml
 
 from .config import get_rcac_config, require_user, scratch_root
-from .ssh import ssh_opt_argv, ssh_opt_str, ssh_target
+from .ssh import ssh_cmd, ssh_opt_str
 
 #: The generic Lmod names.  No versions: Lmod resolves the site default, which
 #: is the only version this code can name without inventing one.
@@ -73,11 +73,6 @@ _PY_VERSION_PROBE = (
 _PY_VERSION_RE = re.compile(r"^\d+\.\d+(?:\.\d+)*$")
 
 
-def _ssh_cmd(cfg: dict) -> list[str]:
-    """Build base SSH command using ControlMaster."""
-    return ["ssh", *ssh_opt_argv(cfg), ssh_target(cfg)]
-
-
 def _run_remote(cfg: dict, command: str) -> subprocess.CompletedProcess:
     """Execute a command on Gilbreth via SSH.
 
@@ -86,7 +81,7 @@ def _run_remote(cfg: dict, command: str) -> subprocess.CompletedProcess:
     that function was never defined and fails with "command not found", which
     reads like the module is missing when it is not.
     """
-    cmd = _ssh_cmd(cfg) + ["bash -l -c " + shlex.quote(command)]
+    cmd = ssh_cmd(cfg) + ["bash -l -c " + shlex.quote(command)]
     return subprocess.run(cmd, capture_output=True, text=True)
 
 
