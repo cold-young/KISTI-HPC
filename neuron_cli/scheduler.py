@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from jinja2 import Environment, FileSystemLoader
+from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 
 def get_template_dir() -> Path:
@@ -13,16 +13,30 @@ def get_template_dir() -> Path:
     return Path(__file__).parent.parent / "templates"
 
 
-def render_slurm_script(template_name: str, **kwargs) -> str:
-    """Render a SLURM script from a Jinja2 template."""
+def render_slurm_script(
+    template_name: str,
+    template_dir: str | Path | None = None,
+    config: dict | None = None,
+    **kwargs,
+) -> str:
+    """Render a SLURM script from a Jinja2 template.
+
+    ``template_dir`` and ``config`` are injection points for tests: when either
+    is omitted it falls back to the on-disk default, so default behaviour is
+    unchanged.
+    """
     # Inject user if not provided
     if "user" not in kwargs:
-        from .config import get_neuron_config
-        cfg = get_neuron_config()
-        kwargs["user"] = cfg["ssh"]["user"]
+        if config is None:
+            from .config import get_neuron_config
+            config = get_neuron_config()
+        kwargs["user"] = config["ssh"]["user"]
+    if template_dir is None:
+        template_dir = get_template_dir()
     env = Environment(
-        loader=FileSystemLoader(str(get_template_dir())),
+        loader=FileSystemLoader(str(template_dir)),
         keep_trailing_newline=True,
+        undefined=StrictUndefined,
     )
     template = env.get_template(template_name)
     return template.render(**kwargs)
@@ -44,10 +58,14 @@ def generate_single_gpu_script(
     env_type: str | None = None,
     env_container: str | None = None,
     config_path: str = "",
+    template_dir: str | Path | None = None,
+    config: dict | None = None,
 ) -> str:
     """Generate a single-GPU SLURM script."""
     return render_slurm_script(
         "single_gpu.sh.j2",
+        template_dir=template_dir,
+        config=config,
         project=project,
         exp_id=exp_id,
         script=script,
@@ -82,10 +100,14 @@ def generate_multi_gpu_script(
     env_type: str | None = None,
     env_container: str | None = None,
     config_path: str = "",
+    template_dir: str | Path | None = None,
+    config: dict | None = None,
 ) -> str:
     """Generate a multi-GPU distributed training SLURM script."""
     return render_slurm_script(
         "multi_gpu.sh.j2",
+        template_dir=template_dir,
+        config=config,
         project=project,
         exp_id=exp_id,
         script=script,
@@ -119,10 +141,14 @@ def generate_job_array_script(
     comment: str = "pytorch",
     modules: list[str] | None = None,
     conda_env: str = "base",
+    template_dir: str | Path | None = None,
+    config: dict | None = None,
 ) -> str:
     """Generate a SLURM job array script for parameter sweeps."""
     return render_slurm_script(
         "job_array.sh.j2",
+        template_dir=template_dir,
+        config=config,
         project=project,
         script=script,
         config_dir=config_dir,
@@ -158,10 +184,14 @@ def generate_pipeline_script(
     env_type: str | None = None,
     env_container: str | None = None,
     config_path: str = "",
+    template_dir: str | Path | None = None,
+    config: dict | None = None,
 ) -> str:
     """Generate a pipeline stage SLURM script with optional dependency."""
     return render_slurm_script(
         "pipeline.sh.j2",
+        template_dir=template_dir,
+        config=config,
         project=project,
         exp_id=exp_id,
         stage_name=stage_name,
