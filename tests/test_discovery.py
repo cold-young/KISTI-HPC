@@ -666,55 +666,92 @@ def test_modules_ignores_the_directory_banner():
 
 
 @pytest.mark.unverified_fixture
-def test_table_keys_cells_by_their_header():
-    """And loses a cell whenever two columns share a header.
+def test_table_keeps_every_cell_under_its_own_column():
+    """C5 pinned this as broken; C6 fixed it, and this is the difference.
 
-    ``myquota`` heads two columns ``Used`` and two ``Use%``; a row is a plain
-    dict keyed by header, so the later pair silently overwrites the earlier.
-    The home row below is the evidence: ``used`` reports ``-`` (the *file*
-    count column) rather than ``16.3GB``, and ``use%`` reports ``-`` rather
-    than ``65%`` -- the two numbers a quota report exists to show.
-
-    This is pinned, not fixed: ``parse_table``'s return type is part of the
-    contract for whatever renders it in C6, and changing it is that commit's
-    decision, not this one's.  It is reported alongside the three defects this
-    commit does fix.
+    ``myquota`` heads two columns ``Used`` and two ``Use%`` -- bytes on the
+    left, inodes on the right.  While a row was a ``{header: cell}`` dict the
+    second pair overwrote the first, so the home row reported ``-`` for both
+    of the numbers a quota report exists to show.  A row is positional now,
+    so nothing collapses: ten headers, ten cells, in order.
     """
     rows = parse_table(load_fixture("myquota.txt"))
 
     assert len(rows) == 2
-    assert rows[0] == {
-        "type": "home",
-        "location": "myusername",
-        "size": "25GB",
-        "used": "-",
-        "avail": "8.7GB",
-        "use%": "-",
-        "files": "-",
-        "limit": "-",
-    }
-    assert rows[1]["type"] == "scratch"
-    assert rows[1]["size"] == "200TB"
+    home = rows[0]
+    assert tuple(home.cells) == (
+        "home",
+        "myusername",
+        "25GB",
+        "16.3GB",
+        "8.7GB",
+        "65%",
+        "-",
+        "-",
+        "-",
+        "-",
+    )
+    assert len(home.headers) == len(home.cells) == 10
+    assert home[0] == "home"
+    assert home.label == "home"
+
+
+@pytest.mark.unverified_fixture
+def test_table_name_lookup_defaults_to_the_first_of_a_duplicated_header():
+    """The regression itself, stated as the two numbers that were being lost."""
+    home, scratch = parse_table(load_fixture("myquota.txt"))
+
+    assert home.get("used") == "16.3GB"
+    assert home.get("use%") == "65%"
+    assert scratch.get("used") == "1.2TB"
+    assert scratch.get("use%") == "1%"
+
+
+@pytest.mark.unverified_fixture
+def test_table_reaches_the_shadowed_column_by_occurrence():
+    """The inode pair is not discarded either -- it is simply the second one."""
+    home, scratch = parse_table(load_fixture("myquota.txt"))
+
+    assert home.indexes("used") == (3, 7)
+    assert home.indexes("use%") == (5, 9)
+    assert scratch.get("used", 1) == "47,113"
+    assert scratch.get("use%", 1) == "2%"
+    assert home.get("used", 1) == "-"
+
+
+def test_table_get_returns_the_default_for_what_is_not_there():
+    (row,) = parse_table("Type Size\nhome 25GB\n")
+
+    assert row.get("nosuchcolumn") == ""
+    assert row.get("nosuchcolumn", default="n/a") == "n/a"
+    assert row.get("size", 1) == ""
 
 
 def test_table_keeps_a_ragged_row_rather_than_truncating_it():
-    """Surplus cells land in ``extra`` -- a ragged report beats a wrong one."""
-    text = "Type Size\nhome 25GB and then some\n"
-    assert parse_table(text) == ({"type": "home", "size": "25GB", "extra": "and then some"},)
+    """Surplus cells are cells with no header -- a ragged report beats a wrong one.
+
+    The old ``extra`` key is gone with the dict: joining the surplus back into
+    one string was a workaround for a shape that could not hold it.
+    """
+    (row,) = parse_table("Type Size\nhome 25GB and then some\n")
+
+    assert tuple(row.cells) == ("home", "25GB", "and", "then", "some")
+    assert row.get("size") == "25GB"
+    assert row[4] == "some"
 
 
 def test_table_drops_rule_lines_and_empty_input():
     assert parse_table("") == ()
     assert parse_table("\n  \n") == ()
-    assert parse_table("Type Size\n==== ====\nhome 25GB\n") == (
-        {"type": "home", "size": "25GB"},
-    )
+    (row,) = parse_table("Type Size\n==== ====\nhome 25GB\n")
+    assert tuple(row.cells) == ("home", "25GB")
 
 
 def test_table_short_row_reports_only_the_cells_present():
-    assert parse_table("Type Size Used\nhome 25GB\n") == (
-        {"type": "home", "size": "25GB"},
-    )
+    (row,) = parse_table("Type Size Used\nhome 25GB\n")
+
+    assert tuple(row.cells) == ("home", "25GB")
+    assert row.get("used") == ""
 
 
 # --------------------------------------------------------------------------

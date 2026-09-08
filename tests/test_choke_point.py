@@ -387,28 +387,70 @@ def test_the_keepalive_job_inherits_the_ac3_guarantees(
     assert expected in str(excinfo.value)
 
 
-def test_setup_cron_writes_a_validated_header_to_the_cluster(monkeypatch) -> None:
-    """AC-6.4 on the real path, not merely on the generator.
-
-    Asserting on ``generate_keepalive_script`` alone would leave the thing that
-    actually reaches a cluster untested: ``setup-cron`` could still be shipping
-    its old f-string.  Every remote command is captured instead of run.
-    """
+def run_setup_cron(monkeypatch, *args) -> str:
+    """``setup-cron`` with every remote command captured instead of run."""
     sent: list[str] = []
 
-    def fake_run(cmd, *args, **kwargs):
+    def fake_run(cmd, *_args, **_kwargs):
         sent.append(cmd[-1])
         return subprocess.CompletedProcess(cmd, 0, stdout="Submitted 1", stderr="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
-    result = CliRunner().invoke(keepalive_cli, ["setup-cron"], env=CLI_ENV)
+    result = CliRunner().invoke(keepalive_cli, ["setup-cron", *args], env=CLI_ENV)
     assert result.exit_code == 0, result.output
+    return "\n".join(sent)
 
-    written = "\n".join(sent)
+
+def test_setup_cron_batch_writes_a_validated_header_to_the_cluster(
+    monkeypatch,
+) -> None:
+    """AC-6.4 on the real path, not merely on the generator.
+
+    Asserting on ``generate_keepalive_script`` alone would leave the thing that
+    actually reaches a cluster untested: ``setup-cron --batch`` could still be
+    shipping its old f-string.
+
+    ``--batch`` and not the bare command since C6: AC-6.5 moved the batch job
+    behind the flag, so this assertion moved with it.  Without that move the
+    test would keep passing on a branch nobody takes by default.
+    """
+    written = run_setup_cron(monkeypatch, "--batch")
+
     assert "#SBATCH -A testqueue" in written, (
-        "setup-cron sent no account-bearing header to the cluster:\n" + written
+        "setup-cron --batch sent no account-bearing header to the cluster:\n"
+        + written
     )
     assert f"#SBATCH -p {KEEPALIVE_FALLBACK_PARTITION}" in written
     assert f"#SBATCH -q {KEEPALIVE_QOS}" in written
     assert "cas_v100_2" not in written
     assert "--comment" not in written
+    assert "sbatch " in written, "the batch form never asked for the job to run"
+
+
+def test_setup_cron_default_submits_nothing_and_still_does_the_work(
+    monkeypatch,
+) -> None:
+    """AC-6.5's other half, asserted from both sides so it cannot pass empty.
+
+    Negative: no directive, no generator output, no ``sbatch`` reaches the
+    cluster -- a default that quietly submitted a GPU job would be the whole
+    defect AC-6.5 names.  Positive: the sweep is still installed and still run,
+    on a front-end node, with the ``find ... -exec touch -a`` body intact.  The
+    pair is what stops the command from satisfying the negative half by doing
+    nothing at all.
+    """
+    written = run_setup_cron(monkeypatch)
+
+    assert "SBATCH" not in written, (
+        "the default path sent a batch directive to the cluster:\n" + written
+    )
+    assert "sbatch" not in written
+    assert KEEPALIVE_QOS not in written
+
+    assert "-exec touch -a" in written, (
+        "the default path installed no sweep at all:\n" + written
+    )
+    assert "keepalive.sh" in written
+    assert written.strip().endswith("bash /scratch/gilbreth/testid/.rcac-tools/keepalive.sh"), (
+        "the default path never ran the sweep on the front-end node:\n" + written
+    )

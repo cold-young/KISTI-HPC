@@ -25,6 +25,7 @@ from click.testing import CliRunner
 
 from rcac_cli._legacy import LEGACY_SSH_END_MARKER, LEGACY_SSH_MARKER
 from rcac_cli.connect import (
+    FRONT_END_NOTE,
     MANAGED_MARKERS,
     SSH_CONFIG_END_MARKER,
     SSH_CONFIG_MARKER,
@@ -137,6 +138,34 @@ def test_generated_block_carries_the_control_master_settings():
     assert "    ControlMaster auto" in block
     assert f"    ControlPath {CFG['ssh']['control_path']}" in block
     assert f"    ControlPersist {CFG['ssh']['control_persist']}" in block
+
+
+def test_generated_block_says_why_control_master_is_there():
+    """AC-8.10's code-side counterpart.
+
+    The README states the 4-front-end fact at C7; this puts it in the file the
+    user will actually reread -- their own ``~/.ssh/config`` -- next to the
+    three directives that answer it.  A user who deletes ``ControlMaster auto``
+    as noise would otherwise get a round-robin login on every command and no
+    hint as to why ``squeue`` stopped seeing what ``sbatch`` just submitted.
+    """
+    block = _generate_ssh_config(CFG)
+
+    assert "4 front-end nodes" in block
+    for line in FRONT_END_NOTE:
+        assert line in block
+
+
+def test_the_front_end_note_cannot_break_the_ac_2_12_assertions():
+    """Every added line is a comment, so none of them is a directive.
+
+    This is the property that lets prose live inside a generated ssh block at
+    all: ``Host``-counting, ``HostName`` extraction and the empty-value scan
+    all read directive lines, and a ``#`` line is not one.
+    """
+    for line in FRONT_END_NOTE:
+        assert line.startswith("#"), line
+        assert not line.startswith("Host"), line
 
 
 # --------------------------------------------------------------------------

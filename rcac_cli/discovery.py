@@ -828,35 +828,97 @@ def discover_modules(
     )
 
 
-def parse_table(text: str) -> tuple:
-    """A generic whitespace-column table -> a tuple of ``{header: cell}`` dicts.
+@dataclass(frozen=True)
+class TableRow:
+    """One row of a whitespace-column report, kept aligned to its headers.
 
-    Used by the two probes whose output we consume as text rather than as
-    structure: a quota report and a purge list are shown to a human, so the
-    parser's job is to keep the columns associated with their headers and stay
-    out of the way.  A row with the wrong number of cells is kept, not dropped
-    -- truncating someone's quota report would be worse than showing a ragged
-    one.
+    **This type exists because a dict was the wrong contract, and ``myquota``
+    is the report that proves it.**  ``myquota`` heads *two* columns ``Used``
+    and *two* ``Use%`` -- bytes on the left, inode counts on the right -- so the
+    previous ``{headers[i]: cell}`` comprehension had the second pair overwrite
+    the first.  For the ``home`` row that meant ``row["used"]`` returned the
+    file-count column and ``row["use%"]`` returned ``-``, instead of ``16.3GB``
+    and ``65%``: the parser silently dropped the two numbers a quota report
+    exists to show, while its own docstring promised to "keep the columns
+    associated with their headers".
+
+    A table is **positional** -- ``cells[i]`` belongs under ``headers[i]`` --
+    so that is what is stored, and nothing is lost.  Name lookup is offered on
+    top of it as :meth:`get`, which resolves a duplicated header by
+    *occurrence* and defaults to the first, so ``get("used")`` is the byte
+    column and ``get("used", 1)`` is the inode column.  Disambiguated keys
+    (``used``/``used_2``) were rejected as the alternative: they encode
+    position in a name, so a report that reorders its columns keeps the key and
+    changes its meaning, which is the same silent-wrong-answer failure in a new
+    place.
+
+    A ragged row is kept rather than dropped -- truncating someone's quota
+    report would be worse than showing a ragged one -- and falls out of the
+    representation instead of needing the old ``extra`` key: extra cells are
+    simply cells with no header, and missing cells are headers with no cell.
+    """
+
+    headers: tuple
+    cells: tuple
+
+    def __len__(self) -> int:
+        return len(self.cells)
+
+    def __getitem__(self, index: int) -> str:
+        """Positional access -- the contract this type is built on."""
+        return self.cells[index]
+
+    def __iter__(self):
+        return iter(self.cells)
+
+    @property
+    def label(self) -> str:
+        """The first cell: what the row is *about* (``home``, ``scratch``)."""
+        return self.cells[0] if self.cells else ""
+
+    def indexes(self, header: str) -> tuple:
+        """Every column index headed *header*, in order (case-insensitive)."""
+        want = header.strip().lower()
+        return tuple(i for i, h in enumerate(self.headers) if h == want)
+
+    def get(self, header: str, occurrence: int = 0, default: str = "") -> str:
+        """The cell under the *occurrence*-th column headed *header*.
+
+        Returns *default* when the header is absent, when the row has fewer
+        occurrences than asked for, or when the row is short of that column.
+        """
+        found = self.indexes(header)
+        if occurrence >= len(found):
+            return default
+        index = found[occurrence]
+        return self.cells[index] if index < len(self.cells) else default
+
+
+def parse_table(text: str) -> tuple:
+    """A generic whitespace-column table -> a tuple of :class:`TableRow`.
+
+    Used by the one probe whose output we consume as a table rather than as a
+    list: ``myquota``.  (``purgelist`` has its own parser -- it reports paths,
+    not columns.)  The report is shown to a human, so the parser's job is to
+    keep every cell associated with its header and stay out of the way; see
+    :class:`TableRow` for why "associated with its header" cannot be a dict.
     """
     lines = [line for line in text.splitlines() if line.strip() and not _is_rule(line)]
     if not lines:
         return ()
-    headers = [h.lower() for h in lines[0].split()]
+    headers = tuple(h.lower() for h in lines[0].split())
     rows: list = []
     for line in lines[1:]:
-        cells = line.split()
-        row = {headers[i]: cell for i, cell in enumerate(cells) if i < len(headers)}
-        if len(cells) > len(headers):
-            row["extra"] = " ".join(cells[len(headers) :])
-        if row:
-            rows.append(row)
+        cells = tuple(line.split())
+        if cells:
+            rows.append(TableRow(headers=headers, cells=cells))
     return tuple(rows)
 
 
 def discover_quota(
     cfg: dict, *, no_discover: bool = False, no_cache: bool = False
 ) -> ProbeResult:
-    """``myquota``.  ``value`` is a tuple of row dicts."""
+    """``myquota``.  ``value`` is a tuple of :class:`TableRow`."""
     return probe(
         cfg,
         name="quota",

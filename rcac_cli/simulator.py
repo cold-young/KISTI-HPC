@@ -13,7 +13,14 @@ from pathlib import Path
 import click
 import yaml
 
-from .config import get_defaults, get_rcac_config, require_account, require_user
+from .config import (
+    get_defaults,
+    get_rcac_config,
+    require_account,
+    require_user,
+    resolve_path,
+    scratch_root,
+)
 from .gilbreth import (
     DEFAULT_QOS,
     PARTITION_GPU,
@@ -23,14 +30,27 @@ from .gilbreth import (
 )
 from .ssh import ssh_opt_argv, ssh_target
 
-# Simulator compatibility matrix with RCAC GPUs
+# Simulator compatibility matrix for Gilbreth's GPUs.
+#
+# `slurm_comment` is gone from every entry.  It fed `sbatch --comment`, which
+# on the previous cluster annotated a job class the scheduler acted on;
+# Gilbreth has no such flag and no such job classes, so the value was a label
+# with nothing to label.  `check_compatibility` no longer returns it and
+# `rcac-sim compat` no longer prints a `--comment` line the user would have
+# pasted into a submission that rejects it.
+#
+# `rt_core_required` is the only per-simulator GPU constraint left, and it is
+# unresolved rather than false: RCAC does not document whether Gilbreth's A10
+# nodes expose RT cores, so Isaac Sim is refused until plan section 6.2 row
+# L16 (`nvidia-smi -q | grep -i rt` in a `-p a10` job) answers it.  That is the
+# same `verified: False` posture `gilbreth.PARTITION_HINTS` takes, and the a10
+# hint carries the matching note.
 SIMULATOR_COMPAT = {
     "genesis": {
         "display_name": "Genesis",
         "rt_core_required": False,
         "container": "genesis-sim.sif",
         "pip_package": "genesis-world",
-        "slurm_comment": "genesis",
         "notes": "Pure CUDA, no RT Core needed. 10-80x faster than Isaac Gym.",
     },
     "mujoco": {
@@ -38,7 +58,6 @@ SIMULATOR_COMPAT = {
         "rt_core_required": False,
         "container": None,
         "pip_package": "mujoco",
-        "slurm_comment": "mujoco",
         "notes": "GPU accel via MJX (JAX backend). Broad physics sim.",
     },
     "isaac_gym": {
@@ -46,7 +65,6 @@ SIMULATOR_COMPAT = {
         "rt_core_required": False,
         "container": "isaacgym-preview.sif",
         "pip_package": None,  # manual install from NVIDIA
-        "slurm_comment": "isaacgym",
         "notes": "DEPRECATED. Use for legacy code only. Pin via an Apptainer image.",
     },
     "isaac_sim": {
@@ -54,15 +72,16 @@ SIMULATOR_COMPAT = {
         "rt_core_required": True,
         "container": None,
         "pip_package": None,
-        "slurm_comment": "isaacsim",
-        "notes": "NOT SUPPORTED on RCAC. Requires RT Core GPUs.",
+        "notes": (
+            "Needs RT Core GPUs. Unconfirmed on Gilbreth's A10 nodes -- plan "
+            "section 6.2 row L16 -- and an unconfirmed yes is a no."
+        ),
     },
     "pybullet": {
         "display_name": "PyBullet",
         "rt_core_required": False,
         "container": None,
         "pip_package": "pybullet",
-        "slurm_comment": "pybullet",
         "notes": "Lightweight sim. Limited GPU acceleration.",
     },
 }
@@ -162,7 +181,6 @@ def check_compatibility(simulator: str, partition: str) -> dict:
         "simulator": sim["display_name"],
         "gpu": gpu_type,
         "container": sim["container"],
-        "comment": sim["slurm_comment"],
     }
 
 
@@ -205,7 +223,6 @@ def check_compat(simulator: str, partition: str) -> None:
         click.echo(f"{result['simulator']}: COMPATIBLE with {result['gpu']} ({partition})")
         if result.get("container"):
             click.echo(f"  Recommended container: {result['container']}")
-        click.echo(f"  SLURM --comment: {result['comment']}")
     else:
         click.echo(f"INCOMPATIBLE: {result['reason']}")
 
@@ -322,7 +339,7 @@ def init_pipeline(simulator: str, env_name: str, episodes: int, output: str, par
             "modules": [],
         },
         "base_params": {
-            "dataset": f"/scratch/$USER/data/{env_name}_{simulator}",
+            "dataset": f"{resolve_path(cfg, 'data')}/{env_name}_{simulator}",
             "epochs": 100,
             "batch_size": 64,
             "optimizer": "adamw",
@@ -351,7 +368,9 @@ def init_pipeline(simulator: str, env_name: str, episodes: int, output: str, par
 
     # Add container config if applicable
     if sim["container"]:
-        experiment["environment"]["container"] = f"/scratch/$USER/.rcac-tools/{sim['container']}"
+        experiment["environment"]["container"] = (
+            f"{scratch_root(cfg)}/.rcac-tools/{sim['container']}"
+        )
 
     with open(output, "w") as f:
         f.write(GENERATED_MANIFEST_HEADER)

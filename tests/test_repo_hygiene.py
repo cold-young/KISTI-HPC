@@ -96,7 +96,7 @@ COMMIT_ORDER: Tuple[str, ...] = (
 #: The commit currently being authored.  Bump this as each commit lands; every
 #: row whose ``earliest_commit`` is <= this value becomes enforced.  Rows above
 #: it are inactive *by construction* -- filtered out, never skipped (AC-7.6).
-ACTIVE_COMMIT = "C5"
+ACTIVE_COMMIT = "C6"
 
 
 def commit_index(commit: str) -> int:
@@ -276,12 +276,42 @@ COMMIT_CHANGE_LISTS: dict[str, set[str]] = {
         "tests/test_repo_hygiene.py",
     },
     # C6 -- retention, simulator, transport.
+    #
+    # Measured from `git status` after the work, like C5's. The plan's step
+    # list named five paths; the tree says ten, and the difference runs in
+    # BOTH directions for the first time:
+    #
+    #   * `{pkg}/sync.py` and `{pkg}/notify.py` are NOT here. C6 step 3 was
+    #     already done -- C2 deleted `--via`, routed `push-data` through
+    #     `transfer_host()` and rewrote the docstring when it removed the
+    #     transfer-node config key, because leaving the flag would have made
+    #     its own default a KeyError. Step 5 was a check, and notify.py passed
+    #     it. Declaring a path a commit does not touch is the same defect as
+    #     omitting one it does: it makes `changed_paths_through` permit a
+    #     dirty file that nothing actually cleaned.
+    #   * `{pkg}/discovery.py`, `tests/test_discovery.py` and
+    #     `tests/fixtures/**` carry C5's deferral: `parse_table` returned
+    #     `{header: cell}` dicts, and `myquota` heads two `Used` and two
+    #     `Use%` columns, so the byte pair was overwritten by the inode pair.
+    #     C5 pinned it rather than fixing it because the return type is the
+    #     contract for whatever renders it -- which is this commit's `check`.
+    #   * `tests/test_choke_point.py` because AC-6.5 moved the batch job
+    #     behind `--batch`, so the C3c assertion that `setup-cron` sends a
+    #     validated header now describes the flagged branch.
+    #   * `tests/test_connect.py` for the 4-front-end note, and
+    #     `tests/test_keepalive.py` because retention had no test module of
+    #     its own -- it is also this commit's arrival marker.
     "C6": {
         "{pkg}/keepalive.py",
         "{pkg}/simulator.py",
-        "{pkg}/sync.py",
         "{pkg}/connect.py",
-        "{pkg}/notify.py",
+        "{pkg}/discovery.py",
+        "tests/fixtures/**",
+        "tests/test_keepalive.py",
+        "tests/test_choke_point.py",
+        "tests/test_connect.py",
+        "tests/test_discovery.py",
+        "tests/test_repo_hygiene.py",
     },
     # C7 -- documentation.  The `.md` layer enters scope here and nowhere
     # earlier (AC-0.3(c)).
@@ -511,7 +541,37 @@ HYGIENE_SCOPE: Tuple[HygieneRow, ...] = (
         kind="test",
         pattern=r"15-day|15 day|15일",
         note="Gilbreth scratch purges at 60 days, not KISTI's 15. The *.md "
-        "half of this criterion is carried by AC-8.4 at C7.",
+        "half of this criterion is carried by AC-8.4 at C7. The row collides "
+        "with three legitimate uses in keepalive.py -- two comments "
+        "explaining the migration and one --help string stating correct "
+        "Gilbreth arithmetic -- and all three were REWORDED rather than "
+        "carved out. Unlike _legacy.py (AC-0.8), which must spell its "
+        "literals in order to detect them at runtime, nothing here needs the "
+        "numeral: the warning window is now derived from the policy constant "
+        "and the migration figure is history, which AC-8.4 already houses "
+        "inside the README's fence. A carve-out would have bought three "
+        "sentences at the price of a repo-wide ban.",
+    ),
+    HygieneRow(
+        ac_id="AC-6.2",
+        earliest_commit="C6",
+        path_globs=("{pkg}/**/*.py",) + TEMPLATE_GLOBS,
+        allowlist=(),
+        kind="test",
+        pattern=r"/scratch/(?!gilbreth/)",
+        note="Five sites at C5: keepalive.py built `/scratch/<user>` at three "
+        "and simulator.py wrote `/scratch/$USER/...` into generated YAML at "
+        "two. Gilbreth's root carries the cluster name, so all five named a "
+        "directory that does not exist -- and none of them failed loudly: a "
+        "`find` over a missing path matches nothing and a manifest is not "
+        "validated until someone launches it. The existing rows could not see "
+        "this class at all; they ban BRANDING, and a missing path segment is "
+        "not a brand. Scoped to the package and its templates rather than to "
+        "SOURCE_GLOBS: tests/test_scheduler.py quotes `/scratch/` as the "
+        "subject of an assertion, and containers/simtoolreal.def tells a "
+        "human where to stage a tarball -- neither is a path this CLI "
+        "produces. AC-6.2 names keepalive.py alone; this generalises it, "
+        "because the failure class is a path builder nobody remembered.",
     ),
     # ---------------------------------------------------------------- AC-8
     HygieneRow(
@@ -861,6 +921,12 @@ COMMIT_ARRIVAL_MARKERS: dict[str, Tuple[str, ...]] = {
         "tests/test_discovery.py",
         "tests/test_partition_selector.py",
     ),
+    # C6 created exactly one file. Retention was the last area of the port
+    # with no test module of its own -- its three properties were spread
+    # across `test_choke_point.py` (the header) and nowhere else (the 60-day
+    # window, the config scratch root) -- so the commit that fixes them is
+    # also the commit that gives them somewhere to live.
+    "C6": ("tests/test_keepalive.py",),
 }
 
 

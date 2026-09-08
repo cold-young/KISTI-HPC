@@ -40,6 +40,20 @@ def _ensure_socket_dir(socket_path: Path) -> None:
     socket_path.parent.mkdir(parents=True, exist_ok=True)
 
 
+#: AC-8.10's code-side counterpart, written into the user's own
+#: ``~/.ssh/config`` rather than only into a README they read once.  Every line
+#: starts with ``#`` so it stays a comment to ssh -- and so it stays out of
+#: AC-2.12's ``Host``-stanza count and its empty-value scan.
+FRONT_END_NOTE = (
+    "# The HostName below resolves to 4 front-end nodes, round-robin.",
+    "# ControlMaster below pins every later ssh/rsync/scp through the single",
+    "# node this session authenticated against, so `sbatch` from one command",
+    "# and `squeue` from the next see the same host -- and two-factor is",
+    "# prompted once per ControlPersist window rather than once per command.",
+    "# Without it, each command lands on whichever front end DNS returned.",
+)
+
+
 def _generate_ssh_config(cfg: dict) -> str:
     """Generate the managed SSH config block.
 
@@ -49,10 +63,15 @@ def _generate_ssh_config(cfg: dict) -> str:
     ``gilbreth`` now that ``login_host`` actually resolves to Gilbreth --
     renaming it earlier would have produced ``Host gilbreth`` with a
     ``HostName`` from a different cluster.
+
+    The block carries :data:`FRONT_END_NOTE` because the ControlMaster
+    directives below are not a convenience here: with 4 front ends behind one
+    name, they are what makes the session single-homed.
     """
     ssh = cfg["ssh"]
     lines = [
         SSH_CONFIG_MARKER,
+        *FRONT_END_NOTE,
         "Host gilbreth",
         f"    HostName {ssh['login_host']}",
         f"    User {ssh['user']}",
@@ -115,7 +134,11 @@ def _is_connected(cfg: dict) -> bool:
 @click.command()
 @click.option("--setup-config", is_flag=True, help="Write SSH config to ~/.ssh/config")
 def connect(setup_config: bool) -> None:
-    """Open an SSH ControlMaster session to RCAC (OTP required once)."""
+    """Open an SSH ControlMaster session to RCAC (two-factor once).
+
+    One master connection to one of Gilbreth's 4 front-end nodes; every later
+    ``rcac-*`` command reuses its socket instead of authenticating again.
+    """
     cfg = get_rcac_config()
     require_user(cfg)
 
@@ -139,7 +162,7 @@ def connect(setup_config: bool) -> None:
     ]
 
     click.echo(f"Connecting to {ssh['login_host']} as {ssh['user']}...")
-    click.echo("Enter OTP when prompted.")
+    click.echo("Complete the two-factor prompt when asked.")
     result = subprocess.run(cmd)
 
     if result.returncode == 0:
