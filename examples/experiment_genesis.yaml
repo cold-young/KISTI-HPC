@@ -1,26 +1,31 @@
 # Genesis simulation -> training -> evaluation pipeline
-# Usage: rcac-exp launch examples/experiment_genesis.yaml
+# Usage: RCAC_ACCOUNT=<your account> rcac-exp launch examples/experiment_genesis.yaml --dry-run
 
 project: manipulation_genesis
 description: "Vision-based manipulation with Genesis simulator"
 
 slurm:
-  partition: amd_a100nv_8
+  # -p selects the GPU TYPE. Documented Gilbreth partitions: a10, a30,
+  # a100-40gb, a100-80gb, training. Run `slist` to see what your account may
+  # use, and change this to match.
+  partition: a100-80gb
+  qos: normal
   nodes: 1
-  gpus: 2
+  gpus_per_node: 2
   cpus_per_gpu: 8
+  mem: 96G
   time: "24:00:00"
-  comment: genesis
+  # -A is deliberately absent: set RCAC_ACCOUNT, or slurm.account in
+  # configs/rcac.yaml.
 
 environment:
   type: singularity
   name: genesis_env
-  container: /scratch/$USER/.rcac-tools/genesis-sim.sif
-  modules:
-    - cuda/12.4.1
+  container: /scratch/gilbreth/$USER/.rcac-tools/genesis-sim.sif
+  # `modules:` deliberately absent -- see examples/experiment_simple.yaml.
 
 base_params:
-  dataset: /scratch/$USER/data/manipulation_genesis
+  dataset: /scratch/gilbreth/$USER/data/manipulation_genesis
   epochs: 100
   batch_size: 64
   optimizer: adamw
@@ -37,7 +42,7 @@ sweep:
 pipeline:
   - name: generate_data
     script: genesis_datagen.py
-    args: "--env manipulation --num_episodes 10000 --output /scratch/$USER/data/manipulation_genesis"
+    args: "--env manipulation --num_episodes 10000 --output /scratch/gilbreth/$USER/data/manipulation_genesis"
 
   - name: train
     script: train.py

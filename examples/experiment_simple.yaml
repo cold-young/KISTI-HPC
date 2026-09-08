@@ -1,25 +1,35 @@
 # Simple training experiment (no simulator)
-# Usage: rcac-exp launch examples/experiment_simple.yaml
+# Usage: RCAC_ACCOUNT=<your account> rcac-exp launch examples/experiment_simple.yaml --dry-run
 
 project: my_model
 description: "Model architecture search"
 
 slurm:
-  partition: amd_a100nv_8
+  # -p selects the GPU TYPE. Documented Gilbreth partitions: a10, a30,
+  # a100-40gb, a100-80gb, training. Run `slist` to see what your account may
+  # use, and change this to match.
+  partition: a100-40gb
+  # -q is the QOS, not an account: normal | standby (uncharged, 4h cap) |
+  # training (requires -p training).
+  qos: normal
   nodes: 1
-  gpus: 2
+  gpus_per_node: 2
   cpus_per_gpu: 8
+  mem: 64G
   time: "12:00:00"
-  comment: pytorch
+  # -A is deliberately absent. Set RCAC_ACCOUNT, or slurm.account in
+  # configs/rcac.yaml -- an account is a credential and does not belong in a
+  # manifest you might commit.
 
 environment:
   type: conda
   name: train_env
-  modules:
-    - cuda/12.4.1
+  # `modules:` is deliberately absent. Do not list a module name that
+  # `module avail` / `module spider` has not printed on Gilbreth -- a
+  # `module load` of a non-existent module fails the job at line one.
 
 base_params:
-  dataset: /scratch/$USER/data/my_dataset
+  dataset: /scratch/gilbreth/$USER/data/my_dataset
   epochs: 50
   batch_size: 128
   optimizer: adamw

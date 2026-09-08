@@ -10,7 +10,7 @@ from pathlib import Path
 
 import click
 
-from .config import get_rcac_config, require_user
+from .config import get_rcac_config, require_user, scratch_root
 from .ssh import ssh_opt_argv, ssh_opt_str, ssh_target
 
 
@@ -26,8 +26,7 @@ def _run_remote(cfg: dict, command: str) -> subprocess.CompletedProcess:
 
 def _fetch_experiment_results(cfg: dict, project: str) -> list[dict]:
     """Fetch all experiment results from RCAC."""
-    user = cfg["ssh"]["user"]
-    exp_dir = f"/scratch/{user}/projects/{project}/experiments"
+    exp_dir = f"{scratch_root(cfg)}/projects/{project}/experiments"
 
     # Step 1: Find all result files
     find_cmd = f"find {exp_dir} -name 'eval_results.json' 2>/dev/null"
@@ -210,8 +209,7 @@ def sync_wandb(project: str, exp_id: str | None) -> None:
 
     require_user(cfg)
 
-    user = cfg["ssh"]["user"]
-    remote_wandb = f"/scratch/{user}/projects/{project}/wandb"
+    remote_wandb = f"{scratch_root(cfg)}/projects/{project}/wandb"
 
     if exp_id:
         remote_wandb = f"{remote_wandb}/*{exp_id}*"

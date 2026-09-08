@@ -1,16 +1,8 @@
 #!/bin/bash
-#SBATCH -J {{ project }}_sweep
-#SBATCH -p {{ partition }}
-#SBATCH --nodes={{ nodes }}
-#SBATCH --ntasks-per-node=1
-#SBATCH --gres=gpu:{{ gpus }}
-#SBATCH --cpus-per-gpu={{ cpus_per_gpu }}
-#SBATCH --time={{ time }}
-#SBATCH --comment {{ comment }}
+{% include '_sbatch_header.j2' %}
 #SBATCH --array=0-{{ array_max }}{% if array_simultaneous %}%{{ array_simultaneous }}{% endif %}
-
-#SBATCH -o /scratch/{{ user }}/logs/%x_%A_%a.out
-#SBATCH -e /scratch/{{ user }}/logs/%x_%A_%a.err
+#SBATCH -o {{ scratch_root }}/logs/%x_%A_%a.out
+#SBATCH -e {{ scratch_root }}/logs/%x_%A_%a.err
 
 # === Environment Setup ===
 {% for mod in modules %}
@@ -21,7 +13,7 @@ export PATH=$HOME/.conda/envs/{{ conda_env }}/bin:$PATH
 {% endif %}
 
 # === Working Directory ===
-cd /scratch/{{ user }}/projects/{{ project }}
+cd {{ scratch_root }}/projects/{{ project }}
 
 # === Select Config by Array Index ===
 CONFIG_DIR="{{ config_dir }}"
@@ -35,5 +27,5 @@ python {{ script }} --config ${CONFIG_FILE} {{ args }}
 
 # === Record Completion ===
 EXIT_CODE=$?
-echo "EXPERIMENT_DONE: $EXPERIMENT_ID exit_code=${EXIT_CODE}" >> /scratch/{{ user }}/logs/completed.log
+echo "EXPERIMENT_DONE: $EXPERIMENT_ID exit_code=${EXIT_CODE}" >> {{ scratch_root }}/logs/completed.log
 exit ${EXIT_CODE}

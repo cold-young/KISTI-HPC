@@ -14,14 +14,72 @@ from pathlib import Path
 import click
 import yaml
 
-from .config import get_defaults, get_rcac_config, require_user
+from .config import (
+    get_defaults,
+    get_rcac_config,
+    require_account,
+    require_user,
+    scratch_root,
+)
+from .gilbreth import DEFAULT_QOS, emit_warnings
 from .ssh import ssh_opt_argv, ssh_opt_str, ssh_target
+# B6/AC-3.16: `generate_job_array_script` was imported here and never called.
+# `rcac-exp launch` submits a sweep as N independent jobs, not as one array, so
+# the import was dead. The generator itself is still real and tested in
+# scheduler.py; wiring `rcac-exp sweep --array` to it is a follow-up.
 from .scheduler import (
-    generate_job_array_script,
     generate_multi_gpu_script,
     generate_pipeline_script,
     generate_single_gpu_script,
 )
+
+#: AC-3.14 / R15. Keys an older experiment.yaml may still carry. None of them
+#: is silently dropped: each one warns and names its replacement, because a
+#: silently ignored `comment:` looks identical to one that was honoured.
+LEGACY_SLURM_KEYS: dict[str, str] = {
+    "comment": (
+        "slurm.comment is ignored: Gilbreth has no --comment job class. "
+        "Remove the key. The billing entity is slurm.account (-A) and the GPU "
+        "type is slurm.partition (-p)."
+    ),
+    "gres": (
+        "slurm.gres is ignored: Gilbreth's documented GPU request form is "
+        "--gpus-per-node, never --gres. Use slurm.gpus_per_node."
+    ),
+    "queue": (
+        "slurm.queue is ignored: use slurm.partition for the GPU type (-p) "
+        "and slurm.qos for the QOS (-q)."
+    ),
+}
+
+
+def _normalise_slurm(source: dict | None, origin: str, warnings: list) -> dict:
+    """Return *source* with pre-port key spellings resolved, warning on each.
+
+    Done once per layer, before the precedence chain runs, so a manifest that
+    still says ``gpus:`` cannot be quietly out-voted by a ``gpus_per_node:``
+    sitting in ``defaults.yaml`` -- which is exactly what a per-key fallback
+    inside the chain would do, and it would do it silently.
+    """
+    out = dict(source or {})
+    for key, message in LEGACY_SLURM_KEYS.items():
+        if key in out:
+            warnings.append(f"{origin}: {message}")
+            out.pop(key)
+    if "gpus" in out:
+        legacy = out.pop("gpus")
+        if "gpus_per_node" in out:
+            warnings.append(
+                f"{origin}: slurm.gpus and slurm.gpus_per_node are both set; "
+                "slurm.gpus is the pre-port spelling and is ignored."
+            )
+        else:
+            warnings.append(
+                f"{origin}: slurm.gpus is the pre-port spelling and is read as "
+                "slurm.gpus_per_node (--gpus-per-node, never --gres). Rename it."
+            )
+            out["gpus_per_node"] = legacy
+    return out
 
 
 def _ssh_cmd(cfg: dict) -> list[str]:
@@ -30,10 +88,17 @@ def _ssh_cmd(cfg: dict) -> list[str]:
 
 
 def _run_remote(cfg: dict, command: str) -> subprocess.CompletedProcess:
-    # Ensure commands run from scratch directory (RCAC sbatch requirement)
-    user = cfg["ssh"]["user"]
-    wrapped = f"cd /scratch/{user} && {command}"
-    cmd = _ssh_cmd(cfg) + [wrapped]
+    """Run *command* on the login host.
+
+    It used to be wrapped in a `cd` into the scratch root, annotated as an
+    "sbatch requirement". That was a requirement of the *previous* cluster and
+    the annotation survived the rename with the cluster name swapped, turning
+    it into a false claim about RCAC. Nothing in Gilbreth's documentation
+    requires a submission to happen from any particular directory, and every
+    command this module sends uses absolute paths, so the wrapper is dropped
+    rather than re-pointed at a directory that may not exist yet.
+    """
+    cmd = _ssh_cmd(cfg) + [command]
     return subprocess.run(cmd, capture_output=True, text=True)
 
 
@@ -95,30 +160,100 @@ def cli() -> None:
 
 @cli.command()
 @click.argument("experiment_file", type=click.Path(exists=True))
-@click.option("--dry-run", is_flag=True, help="Generate scripts without submitting")
+@click.option("--dry-run", is_flag=True,
+              help="Generate scripts and print the exact sbatch command without "
+                   "submitting or contacting the cluster at all.")
 @click.option("-n", "--max-jobs", default=None, type=int, help="Limit number of sweep combinations")
-@click.option("--partition", default=None, help="Override SLURM partition (e.g., amd_a100nv_8)")
-@click.option("--gpus", "gpu_override", default=None, type=int, help="Override number of GPUs")
-def launch(experiment_file: str, dry_run: bool, max_jobs: int | None, partition: str | None, gpu_override: int | None) -> None:
+@click.option("-A", "--account", "account_override", default=None,
+              help="SLURM account (-A): the allocation the job is billed to. "
+                   "Run `slist` on the cluster to see yours.")
+@click.option("-p", "--partition", "partition_override", default=None,
+              help="SLURM partition (-p): selects the GPU TYPE, e.g. a10, a30, "
+                   "a100-40gb, a100-80gb, training.")
+@click.option("-q", "--qos", "qos_override", default=None,
+              help="SLURM QOS (-q): normal, standby (uncharged, 4 hour cap) or "
+                   "training (requires -p training).")
+@click.option("--time", "time_override", default=None,
+              help="Walltime (--time): MM, MM:SS, HH:MM:SS, D-HH[:MM[:SS]].")
+@click.option("--mem", "mem_override", default=None,
+              help="Memory per node (--mem), e.g. 64G. Default: gpus_per_node x 32G.")
+@click.option("--constraint", "constraint_override", default=None,
+              help="Node feature (--constraint). Only 'nvlink' is documented, on "
+                   "a100-40gb with multiple GPUs serving a single task.")
+@click.option("--gpus", "gpu_override", default=None, type=int,
+              help="Override --gpus-per-node.")
+@click.option("--no-discover", is_flag=True,
+              help="Do not ask the cluster for its partition list, so an "
+                   "unrecognised partition warns instead of failing. Runtime "
+                   "discovery is not implemented yet, so today every run "
+                   "already behaves this way.")
+def launch(
+    experiment_file: str,
+    dry_run: bool,
+    max_jobs: int | None,
+    account_override: str | None,
+    partition_override: str | None,
+    qos_override: str | None,
+    time_override: str | None,
+    mem_override: str | None,
+    constraint_override: str | None,
+    gpu_override: int | None,
+    no_discover: bool,
+) -> None:
     """Launch experiments from an experiment.yaml file."""
     cfg = get_rcac_config()
 
     require_user(cfg)
+    scratch = scratch_root(cfg)
 
     with open(experiment_file) as f:
         exp = yaml.safe_load(f)
 
     project = exp["project"]
-    slurm = exp.get("slurm", {})
     defaults = get_defaults()
-    slurm_defaults = defaults.get("slurm", {})
 
-    partition = partition or slurm.get("partition", slurm_defaults.get("partition", "amd_a100nv_8"))
-    nodes = slurm.get("nodes", slurm_defaults.get("nodes", 1))
-    gpus = gpu_override or slurm.get("gpus", slurm_defaults.get("gpus", 2))
-    cpus_per_gpu = slurm.get("cpus_per_gpu", slurm_defaults.get("cpus_per_gpu", 8))
-    time_limit = slurm.get("time", slurm_defaults.get("time", "24:00:00"))
-    comment = slurm.get("comment", slurm_defaults.get("comment", "pytorch"))
+    # AC-3.14 / R15. A legacy key is never silently dropped.
+    manifest_warnings: list[str] = []
+    slurm = _normalise_slurm(exp.get("slurm"), experiment_file, manifest_warnings)
+    slurm_defaults = _normalise_slurm(
+        defaults.get("slurm"), "defaults.yaml", manifest_warnings
+    )
+
+    def pick(key: str, override, literal=None):
+        """CLI flag > experiment.yaml `slurm:` > defaults.yaml `slurm:` > literal.
+
+        ``None`` means "not supplied at this level", so an explicit ``0`` or an
+        empty string from a manifest still wins over the level below it.
+        """
+        for candidate in (override, slurm.get(key), slurm_defaults.get(key)):
+            if candidate is not None:
+                return candidate
+        return literal
+
+    partition = pick("partition", partition_override)
+    qos = pick("qos", qos_override, DEFAULT_QOS)
+    nodes = pick("nodes", None, 1)
+    gpus_per_node = pick("gpus_per_node", gpu_override, 1)
+    cpus_per_gpu = pick("cpus_per_gpu", None, 8)
+    time_limit = pick("time", time_override)
+    mem = pick("mem", mem_override)
+    constraint = pick("constraint", constraint_override)
+
+    # `-A` is a credential, so the environment outranks the manifest: RCAC_USER
+    # / RCAC_ACCOUNT are the documented primary path precisely so nobody has to
+    # write their account into a file they might commit (P4). An explicit
+    # `--account` still wins over both.
+    account = account_override or cfg.get("slurm", {}).get("account") or slurm.get("account")
+    if not account:
+        require_account(cfg)
+
+    # AC-3.8's tri-state. Runtime partition discovery lands with
+    # `discovery.py`; until then this is always None, meaning "not checked" --
+    # an unrecognised partition warns and renders rather than being rejected on
+    # the strength of a static table that may already be stale. `--no-discover`
+    # is accepted now so the flag's meaning is fixed before the behaviour it
+    # suppresses exists; it does not yet change anything.
+    known_partitions = None
 
     env_cfg = exp.get("environment", {})
     conda_env = env_cfg.get("name", "base")
@@ -140,21 +275,53 @@ def launch(experiment_file: str, dry_run: bool, max_jobs: int | None, partition:
     if max_jobs:
         configs = configs[:max_jobs]
 
+    emit_warnings(manifest_warnings)
+
     click.echo(f"Project: {project}")
     click.echo(f"Parameter combinations: {len(configs)}")
 
     # Create experiment directory structure
-    user = cfg["ssh"]["user"]
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    exp_base = f"/scratch/{user}/projects/{project}"
+    exp_base = f"{scratch}/projects/{project}"
     config_remote_dir = f"{exp_base}/configs/{timestamp}"
     scripts_dir = Path(f"/tmp/rcac_exp_{timestamp}")
     scripts_dir.mkdir(parents=True, exist_ok=True)
 
-    # Ensure remote directories
-    _run_remote(cfg, f"mkdir -p {config_remote_dir} /scratch/{user}/logs {exp_base}/experiments")
+    # Ensure remote directories. AC-3.15: --dry-run contacts nothing, so this
+    # is gated -- it used to run unconditionally and opened an SSH connection
+    # even on a dry run.
+    if not dry_run:
+        _run_remote(cfg, f"mkdir -p {config_remote_dir} {scratch}/logs {exp_base}/experiments")
 
     job_ids = []
+    #: Every SubmissionPlan warning raised across the run. Re-printed at the
+    #: end because one warning above a 40-job sweep has scrolled off by then.
+    run_warnings: list[str] = list(manifest_warnings)
+
+    def build(generator, **kwargs) -> str:
+        """Render one script, emitting and accumulating its plan warnings."""
+        plans: list = []
+        script_text = generator(
+            account=account,
+            partition=partition,
+            qos=qos,
+            time=time_limit,
+            nodes=nodes,
+            gpus_per_node=gpus_per_node,
+            cpus_per_gpu=cpus_per_gpu,
+            mem=mem,
+            constraint=constraint,
+            known_partitions=known_partitions,
+            modules=modules,
+            conda_env=conda_env,
+            plan_out=plans,
+            **kwargs,
+        )
+        if plans:
+            fresh = [w for w in plans[0].warnings if w not in run_warnings]
+            emit_warnings(fresh)
+            run_warnings.extend(fresh)
+        return script_text
 
     for i, config in enumerate(configs):
         exp_id = f"{timestamp}_{i:03d}"
@@ -174,7 +341,7 @@ def launch(experiment_file: str, dry_run: bool, max_jobs: int | None, partition:
                 script = stage["script"]
                 # BUG-K2 fix: previously only `{config_path}` was substituted
                 # via str.replace, leaving every other manifest token
-                # (`{hdf5}`, `{exp_id}`, `{config_id}`, sweep keys, …) as a
+                # (`{hdf5}`, `{exp_id}`, `{config_id}`, sweep keys, ...) as a
                 # literal in the sbatch args -> argparse failed at runtime.
                 # Now we expose base_params + per-combo sweep keys + meta keys
                 # via str.format_map, raising on truly missing keys so the
@@ -197,21 +364,14 @@ def launch(experiment_file: str, dry_run: bool, max_jobs: int | None, partition:
                     )
                     sys.exit(2)
 
-                slurm_script = generate_pipeline_script(
+                slurm_script = build(
+                    generate_pipeline_script,
                     project=project,
                     exp_id=exp_id,
                     stage_name=stage_name,
                     script=script,
                     args=args,
                     dependency_job_id=prev_job_id,
-                    partition=partition,
-                    nodes=nodes,
-                    gpus=gpus,
-                    cpus_per_gpu=cpus_per_gpu,
-                    time=time_limit,
-                    comment=comment,
-                    modules=modules,
-                    conda_env=conda_env,
                     env_type=env_type,
                     env_container=env_container,
                     config_path=config_path,
@@ -219,11 +379,11 @@ def launch(experiment_file: str, dry_run: bool, max_jobs: int | None, partition:
 
                 local_script = scripts_dir / f"job_{i:03d}_{stage_name}.sh"
                 local_script.write_text(slurm_script)
+                remote_script = f"{exp_base}/scripts/job_{i:03d}_{stage_name}.sh"
 
                 if not dry_run:
                     # Upload config and script
                     _upload_file(cfg, str(local_config), config_path)
-                    remote_script = f"{exp_base}/scripts/job_{i:03d}_{stage_name}.sh"
                     _run_remote(cfg, f"mkdir -p {exp_base}/scripts")
                     _upload_file(cfg, str(local_script), remote_script)
 
@@ -238,26 +398,23 @@ def launch(experiment_file: str, dry_run: bool, max_jobs: int | None, partition:
                         click.echo(f"  [{exp_id}/{stage_name}] Failed: {result.stderr}", err=True)
                         break
                 else:
-                    click.echo(f"  [{exp_id}/{stage_name}] Script: {local_script}")
+                    _echo_dry_run(f"{exp_id}/{stage_name}", local_script, remote_script, slurm_script)
         else:
             # Single stage mode (no pipeline defined)
             train_script = "train.py"
             args = f"--config {config_path}"
 
-            gen_fn = generate_multi_gpu_script if gpus > 1 else generate_single_gpu_script
-            slurm_script = gen_fn(
+            gen_fn = (
+                generate_multi_gpu_script
+                if int(gpus_per_node) > 1
+                else generate_single_gpu_script
+            )
+            slurm_script = build(
+                gen_fn,
                 project=project,
                 exp_id=exp_id,
                 script=train_script,
                 args=args,
-                partition=partition,
-                nodes=nodes,
-                gpus=gpus,
-                cpus_per_gpu=cpus_per_gpu,
-                time=time_limit,
-                comment=comment,
-                modules=modules,
-                conda_env=conda_env,
                 env_type=env_type,
                 env_container=env_container,
                 config_path=config_path,
@@ -265,10 +422,10 @@ def launch(experiment_file: str, dry_run: bool, max_jobs: int | None, partition:
 
             local_script = scripts_dir / f"job_{i:03d}.sh"
             local_script.write_text(slurm_script)
+            remote_script = f"{exp_base}/scripts/job_{i:03d}.sh"
 
             if not dry_run:
                 _upload_file(cfg, str(local_config), config_path)
-                remote_script = f"{exp_base}/scripts/job_{i:03d}.sh"
                 _run_remote(cfg, f"mkdir -p {exp_base}/scripts")
                 _upload_file(cfg, str(local_script), remote_script)
 
@@ -280,7 +437,7 @@ def launch(experiment_file: str, dry_run: bool, max_jobs: int | None, partition:
                 else:
                     click.echo(f"  [{exp_id}] Failed: {result.stderr}", err=True)
             else:
-                click.echo(f"  [{exp_id}] Script: {local_script}")
+                _echo_dry_run(exp_id, local_script, remote_script, slurm_script)
 
     # Save job tracking info
     tracking = {
@@ -294,14 +451,37 @@ def launch(experiment_file: str, dry_run: bool, max_jobs: int | None, partition:
     with open(tracking_file, "w") as f:
         json.dump(tracking, f, indent=2)
 
+    emit_warnings(
+        run_warnings,
+        header="Warnings raised during this run (repeated -- the first copy has "
+               "scrolled off by now):",
+    )
+
     if dry_run:
-        click.echo(f"\nDry run complete. Scripts in: {scripts_dir}")
+        click.echo(f"\nDry run complete. Nothing was submitted and the cluster "
+                   f"was not contacted. Scripts in: {scripts_dir}")
     else:
         click.echo(f"\nSubmitted {len(job_ids)} jobs: {job_ids}")
         # Also save tracking remotely
         remote_tracking = f"{exp_base}/experiments/{timestamp}/tracking.json"
         _run_remote(cfg, f"mkdir -p {exp_base}/experiments/{timestamp}")
         _upload_file(cfg, str(tracking_file), remote_tracking)
+
+
+def _echo_dry_run(label: str, local_script: Path, remote_script: str, body: str) -> None:
+    """AC-3.15 -- print the exact sbatch command and the full script.
+
+    A dry run whose entire output is a path is not a dry run of the thing that
+    matters: the generated script IS the product, and the point of `--dry-run`
+    offline is to read the SBATCH directive block before a live submission
+    ever happens. Nothing here touches the network -- AC-3.19(a)'s text scan
+    bans the directive token outside the templates, so it is not spelled here.
+    """
+    click.echo(f"  [{label}] Script: {local_script}")
+    click.echo(f"  [{label}] Would run: sbatch {remote_script}")
+    click.echo(f"--- begin {remote_script} ---")
+    click.echo(body.rstrip("\n"))
+    click.echo(f"--- end {remote_script} ---")
 
 
 def _upload_file(cfg: dict, local_path: str, remote_path: str) -> bool:
@@ -351,8 +531,10 @@ def logs(job_id: str) -> None:
 
     require_user(cfg)
 
-    user = cfg["ssh"]["user"]
-    result = _run_remote(cfg, f"ls -t /scratch/{user}/logs/*_{job_id}.out 2>/dev/null | head -1")
+    result = _run_remote(
+        cfg,
+        f"ls -t {scratch_root(cfg)}/logs/*_{job_id}.out 2>/dev/null | head -1",
+    )
 
     if result.returncode != 0 or not result.stdout.strip():
         click.echo(f"No log file found for job {job_id}.")
@@ -456,9 +638,10 @@ def watch(project: str, auto_pull: str | None, interval: int, jobs: str | None) 
 def _auto_pull_results(cfg: dict, project: str, local_dir: str) -> None:
     """Pull experiment results from RCAC to local directory."""
     from pathlib import Path
-    ssh = cfg["ssh"]
-    user = ssh["user"]
-    remote = f"{user}@{ssh['login_host']}:/scratch/{user}/projects/{project}/experiments/"
+    remote = (
+        f"{ssh_target(cfg)}:"
+        f"{scratch_root(cfg)}/projects/{project}/experiments/"
+    )
     local = Path(local_dir).resolve()
     local.mkdir(parents=True, exist_ok=True)
 

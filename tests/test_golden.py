@@ -39,7 +39,24 @@ GOLDEN_DIR = Path(__file__).parent / "golden"
 
 # The user value used by the injected set. Deliberately different from the
 # on-disk config value so the two sets cannot silently collapse into one.
-INJECTED_CONFIG = {"ssh": {"user": "golden_user"}}
+# `paths.scratch` keeps its `{user}` template form -- the loader does not format
+# it, `config.scratch_root()` does (B10/AC-3.17).
+INJECTED_CONFIG = {
+    "ssh": {"user": "golden_user"},
+    "paths": {"scratch": "/scratch/gilbreth/{user}"},
+}
+
+# From C3b the generators render from a `gilbreth.SubmissionPlan`, so `-A`,
+# `-p` and `--time` are required and carry no defaults. These values are
+# fixtures, not recommendations: `a100-40gb` with 2 GPUs is chosen because it
+# is the one combination for which `--constraint=nvlink` is documented, so the
+# snapshots cover the constraint line as well as the plain header.
+SUBMISSION = {
+    "account": "golden_account",
+    "partition": "a100-40gb",
+    "qos": "normal",
+    "time": "04:00:00",
+}
 
 # name -> callable(**injection_kwargs) -> rendered script
 CASES = {
@@ -50,6 +67,7 @@ CASES = {
         args="--lr 1e-4",
         conda_env="golden_env",
         config_path="configs/exp_001.yaml",
+        **SUBMISSION,
         **inj,
     ),
     "multi_gpu": lambda **inj: generate_multi_gpu_script(
@@ -57,10 +75,12 @@ CASES = {
         exp_id="exp_001",
         script="train.py",
         args="--lr 1e-4",
-        nodes=2,
-        gpus=4,
+        nodes=1,
+        gpus_per_node=2,
+        constraint="nvlink",
         conda_env="golden_env",
         config_path="configs/exp_001.yaml",
+        **SUBMISSION,
         **inj,
     ),
     "job_array": lambda **inj: generate_job_array_script(
@@ -71,6 +91,7 @@ CASES = {
         args="--epochs 10",
         array_simultaneous=2,
         conda_env="golden_env",
+        **SUBMISSION,
         **inj,
     ),
     "pipeline_with_dependency": lambda **inj: generate_pipeline_script(
@@ -81,6 +102,7 @@ CASES = {
         dependency_job_id="12345",
         conda_env="golden_env",
         config_path="configs/exp_001.yaml",
+        **SUBMISSION,
         **inj,
     ),
     "pipeline_without_dependency": lambda **inj: generate_pipeline_script(
@@ -90,6 +112,7 @@ CASES = {
         script="train.py",
         conda_env="golden_env",
         config_path="configs/exp_001.yaml",
+        **SUBMISSION,
         **inj,
     ),
 }
@@ -143,7 +166,9 @@ def test_golden_snapshot_matches(set_name: str, case_name: str) -> None:
 
 def test_template_dir_injection_is_honoured(tmp_path: Path) -> None:
     """``template_dir`` must select the loader root, not be ignored."""
-    (tmp_path / "single_gpu.sh.j2").write_text("sentinel {{ project }} {{ user }}\n")
+    (tmp_path / "single_gpu.sh.j2").write_text(
+        "sentinel {{ project }} {{ user }} {{ scratch_root }}\n"
+    )
     from rcac_cli.scheduler import render_slurm_script
 
     out = render_slurm_script(
@@ -152,7 +177,7 @@ def test_template_dir_injection_is_honoured(tmp_path: Path) -> None:
         config=INJECTED_CONFIG,
         project="golden_project",
     )
-    assert out == "sentinel golden_project golden_user\n"
+    assert out == "sentinel golden_project golden_user /scratch/gilbreth/golden_user\n"
 
 
 def _regenerate() -> None:

@@ -1,23 +1,22 @@
 #!/bin/bash
 #SBATCH -J golden_project_train_exp_001
-#SBATCH -p amd_a100nv_8
+#SBATCH -A golden_account
+#SBATCH -p a100-40gb
+#SBATCH -q normal
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --gres=gpu:1
+#SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-gpu=8
-#SBATCH --time=24:00:00
-#SBATCH --comment pytorch
-
-#SBATCH -o /scratch/golden_user/logs/%x_%j.out
-#SBATCH -e /scratch/golden_user/logs/%x_%j.err
+#SBATCH --mem=32G
+#SBATCH --time=04:00:00
+#SBATCH -o /scratch/gilbreth/golden_user/logs/%x_%j.out
+#SBATCH -e /scratch/gilbreth/golden_user/logs/%x_%j.err
 
 # === Environment Setup ===
 
-module load cuda/12.4.1
-
 
 # === Working Directory ===
-cd /scratch/golden_user/projects/golden_project
+cd /scratch/gilbreth/golden_user/projects/golden_project
 
 # === Stage: train ===
 export EXPERIMENT_ID="exp_001"
@@ -35,5 +34,5 @@ python train.py
 
 
 EXIT_CODE=$?
-echo "STAGE_DONE: ${STAGE_NAME} exp=${EXPERIMENT_ID} exit_code=${EXIT_CODE}" >> /scratch/golden_user/logs/completed.log
+echo "STAGE_DONE: ${STAGE_NAME} exp=${EXPERIMENT_ID} exit_code=${EXIT_CODE}" >> /scratch/gilbreth/golden_user/logs/completed.log
 exit ${EXIT_CODE}

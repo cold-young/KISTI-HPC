@@ -1,0 +1,42 @@
+{#-
+  The one #SBATCH header, included by all four job templates (AC-3.1).
+
+  It exists so "every template emits -A, -p, -q, --gpus-per-node, --mem and
+  --time" is a structural property of the templates rather than something four
+  copies happen to agree on this week.  The AC-3.1 test is parametrised over
+  all four templates, but a shared partial is what makes it hard to *break*.
+
+  Gilbreth's model, and why this differs from the pre-port header:
+    -A  the allocation the job is billed to.  Required on every submission.
+    -p  the GPU TYPE.  Required.  This is why no generic-resource GPU request
+        appears here: the GPU type is chosen by the partition, so asking for
+        an A100 generic resource next to `-p a10` is a contradiction sbatch
+        resolves in whichever way the user did not intend.  The documented
+        request form is --gpus-per-node.
+    -q  the QOS (normal / standby / training).  A QOS, never an account.
+  The job-class annotation the pre-port header carried is gone entirely -- it
+  named the previous cluster's job classes and means nothing here.
+
+  Every value below comes from a rcac_cli.gilbreth.SubmissionPlan, so nothing
+  reaches this file without having gone through build_directives().  The two
+  exceptions are `job_name`, composed per-template in Python (AC-3.18), and
+  `cpus_per_gpu`, which no documented Gilbreth rule constrains.
+
+  Per-template directives deliberately NOT shared: `--array=` (job_array),
+  `--dependency=` (pipeline) and `-o`/`-e`, whose filename patterns genuinely
+  differ (%x_%A_%a for an array, %x_%j otherwise).
+-#}
+#SBATCH -J {{ job_name }}
+#SBATCH -A {{ account }}
+#SBATCH -p {{ partition }}
+#SBATCH -q {{ qos }}
+#SBATCH --nodes={{ nodes }}
+#SBATCH --ntasks-per-node={{ ntasks_per_node }}
+#SBATCH --gpus-per-node={{ gpus_per_node }}
+#SBATCH --cpus-per-gpu={{ cpus_per_gpu }}
+#SBATCH --mem={{ mem }}
+#SBATCH --time={{ time }}
+{%- if constraint %}
+#SBATCH --constraint={{ constraint }}
+{%- endif %}{#- the trailing newline is stripped here so each including template
+    controls its own spacing; every includer supplies the newline itself -#}

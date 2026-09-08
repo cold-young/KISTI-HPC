@@ -8,7 +8,7 @@ from pathlib import Path
 import click
 import yaml
 
-from .config import get_defaults, get_rcac_config, require_user
+from .config import get_defaults, get_rcac_config, require_user, scratch_root
 from .ssh import ssh_opt_argv, ssh_opt_str, ssh_target
 
 CONDA_BIN = "/apps/applications/Miniconda/25.11.1/bin/conda"
@@ -54,12 +54,13 @@ def setup(from_file: str, name: str) -> None:
     ssh = cfg["ssh"]
     user = ssh["user"]
     host = ssh["login_host"]
-    remote_tmp = f"/scratch/{user}/.rcac-tools/environment.yml"
+    scratch = scratch_root(cfg)
+    remote_tmp = f"{scratch}/.rcac-tools/environment.yml"
     conda = _get_conda_path(defaults)
 
     # Upload environment.yml to RCAC
     click.echo("Uploading environment file...")
-    _run_remote(cfg, f"mkdir -p /scratch/{user}/.rcac-tools")
+    _run_remote(cfg, f"mkdir -p {scratch}/.rcac-tools")
     rsync_cmd = [
         "rsync", "-az",
         "-e", ssh_opt_str(cfg),

@@ -1,27 +1,26 @@
 #!/bin/bash
 #SBATCH -J golden_project_sweep
-#SBATCH -p amd_a100nv_8
+#SBATCH -A golden_account
+#SBATCH -p a100-40gb
+#SBATCH -q normal
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --gres=gpu:1
+#SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-gpu=8
-#SBATCH --time=24:00:00
-#SBATCH --comment pytorch
+#SBATCH --mem=32G
+#SBATCH --time=04:00:00
 #SBATCH --array=0-7%2
-
-#SBATCH -o /scratch/golden_user/logs/%x_%A_%a.out
-#SBATCH -e /scratch/golden_user/logs/%x_%A_%a.err
+#SBATCH -o /scratch/gilbreth/golden_user/logs/%x_%A_%a.out
+#SBATCH -e /scratch/gilbreth/golden_user/logs/%x_%A_%a.err
 
 # === Environment Setup ===
-
-module load cuda/12.4.1
 
 
 export PATH=$HOME/.conda/envs/golden_env/bin:$PATH
 
 
 # === Working Directory ===
-cd /scratch/golden_user/projects/golden_project
+cd /scratch/gilbreth/golden_user/projects/golden_project
 
 # === Select Config by Array Index ===
 CONFIG_DIR="configs/sweep"
@@ -35,5 +34,5 @@ python train.py --config ${CONFIG_FILE} --epochs 10
 
 # === Record Completion ===
 EXIT_CODE=$?
-echo "EXPERIMENT_DONE: $EXPERIMENT_ID exit_code=${EXIT_CODE}" >> /scratch/golden_user/logs/completed.log
+echo "EXPERIMENT_DONE: $EXPERIMENT_ID exit_code=${EXIT_CODE}" >> /scratch/gilbreth/golden_user/logs/completed.log
 exit ${EXIT_CODE}

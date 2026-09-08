@@ -179,14 +179,24 @@ COMMIT_CHANGE_LISTS: dict[str, set[str]] = {
         "{pkg}/gilbreth.py",
         "tests/test_gilbreth.py",
     },
-    # C3b -- primary submission path.
+    # C3b -- primary submission path.  The scratch-root injection (B9) reaches
+    # past the four templates into every module that still built a scratch path
+    # from an f-string, and the four rendering test files all break on the new
+    # required signatures, so all of them are touched here.
     "C3b": {
         "{pkg}/templates/**",
         "{pkg}/scheduler.py",
         "{pkg}/experiment.py",
+        "{pkg}/env.py",
+        "{pkg}/container.py",
+        "{pkg}/results.py",
         "configs/defaults.yaml",
+        "{pkg}/configs/defaults.yaml",
         "examples/*.yaml",
         "tests/test_scheduler.py",
+        "tests/test_rendered_shape.py",
+        "tests/test_golden.py",
+        "tests/golden/**",
     },
     # C3c -- the two non-scheduler producers.
     "C3c": {

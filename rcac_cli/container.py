@@ -9,7 +9,7 @@ from pathlib import Path
 
 import click
 
-from .config import get_rcac_config, require_user
+from .config import get_rcac_config, require_user, scratch_root
 from .ssh import globus_guidance, ssh_opt_argv, ssh_opt_str, ssh_target, transfer_host
 
 
@@ -46,12 +46,13 @@ def build(def_file: str, name: str | None, remote_build: bool) -> None:
         require_user(cfg)
 
         user = cfg["ssh"]["user"]
-        remote_def = f"/scratch/{user}/.rcac-tools/{def_path.name}"
-        remote_sif = f"/scratch/{user}/.rcac-tools/{image_name}"
+        scratch = scratch_root(cfg)
+        remote_def = f"{scratch}/.rcac-tools/{def_path.name}"
+        remote_sif = f"{scratch}/.rcac-tools/{image_name}"
 
         # Upload definition file
         click.echo(f"Uploading {def_path.name} to RCAC...")
-        _run_remote(cfg, f"mkdir -p /scratch/{user}/.rcac-tools")
+        _run_remote(cfg, f"mkdir -p {scratch}/.rcac-tools")
         ssh = cfg["ssh"]
         subprocess.run(
             ["scp", "-P", str(ssh["port"]), str(def_path),
@@ -84,7 +85,8 @@ def build(def_file: str, name: str | None, remote_build: bool) -> None:
 
 @cli.command()
 @click.argument("image", type=click.Path(exists=True))
-@click.option("--dest", "-d", default=None, help="Remote path (default: /scratch/$USER/.rcac-tools/)")
+@click.option("--dest", "-d", default=None,
+              help="Remote path (default: <paths.scratch>/.rcac-tools/)")
 def push(image: str, dest: str | None) -> None:
     """Upload a Singularity image to RCAC."""
     cfg = get_rcac_config()
@@ -96,7 +98,7 @@ def push(image: str, dest: str | None) -> None:
 
     # Gilbreth has no data-transfer node, so this goes over the login host.
     host = transfer_host(cfg)
-    remote_dest = dest or f"/scratch/{user}/.rcac-tools/{image_path.name}"
+    remote_dest = dest or f"{scratch_root(cfg)}/.rcac-tools/{image_path.name}"
 
     size_bytes = image_path.stat().st_size
     click.echo(f"Uploading {image_path.name} to RCAC...")
@@ -123,7 +125,8 @@ def push(image: str, dest: str | None) -> None:
 @cli.command()
 @click.argument("image_path")
 @click.argument("command", nargs=-1)
-@click.option("--bind", "-B", multiple=True, help="Bind mount paths (e.g., /scratch/$USER:/data)")
+@click.option("--bind", "-B", multiple=True,
+              help="Bind mount paths (e.g., <paths.scratch>:/data)")
 @click.option("--nv", is_flag=True, default=True, help="Enable NVIDIA GPU support (default: on)")
 def run(image_path: str, command: tuple[str, ...], bind: tuple[str, ...], nv: bool) -> None:
     """Run a command inside a Singularity container on RCAC.
@@ -157,8 +160,11 @@ def list_images() -> None:
 
     require_user(cfg)
 
-    user = cfg["ssh"]["user"]
-    result = _run_remote(cfg, f"find /scratch/{user} -name '*.sif' -printf '%s %p\\n' 2>/dev/null | sort -rn")
+    result = _run_remote(
+        cfg,
+        f"find {scratch_root(cfg)} -name '*.sif' -printf '%s %p\\n' "
+        "2>/dev/null | sort -rn",
+    )
 
     if result.returncode != 0 or not result.stdout.strip():
         click.echo("No Singularity images found.")

@@ -1,14 +1,7 @@
 #!/bin/bash
-#SBATCH -J {{ project }}_{{ exp_id }}
-#SBATCH -p {{ partition }}
-#SBATCH --nodes={{ nodes }}
-#SBATCH --ntasks-per-node=1
-#SBATCH --gres=gpu:{{ gpus }}
-#SBATCH --cpus-per-gpu={{ cpus_per_gpu }}
-#SBATCH --time={{ time }}
-#SBATCH --comment {{ comment }}
-#SBATCH -o /scratch/{{ user }}/logs/%x_%j.out
-#SBATCH -e /scratch/{{ user }}/logs/%x_%j.err
+{% include '_sbatch_header.j2' %}
+#SBATCH -o {{ scratch_root }}/logs/%x_%j.out
+#SBATCH -e {{ scratch_root }}/logs/%x_%j.err
 
 # === Environment Setup ===
 {% for mod in modules %}
@@ -16,7 +9,7 @@ module load {{ mod }}
 {% endfor %}
 
 # === Working Directory ===
-cd /scratch/{{ user }}/projects/{{ project }}
+cd {{ scratch_root }}/projects/{{ project }}
 
 # === Experiment ===
 export EXPERIMENT_ID="{{ exp_id }}"
@@ -26,12 +19,12 @@ export WANDB_MODE=offline
 # === Python invocation === (BUG-K1 fix: respect environment.type)
 {% if env_type == "singularity" %}
 singularity exec --nv \
-    --bind /scratch/{{ user }}:/scratch/{{ user }} \
+    --bind {{ scratch_root }}:{{ scratch_root }} \
     {{ env_container }} \
     python {{ script }} {{ args }}
 {% elif env_type == "conda" %}
 source /apps/applications/Miniconda/25.11.1/etc/profile.d/conda.sh
-export CONDA_ENVS_PATH=/scratch/{{ user }}/.conda_envs:$CONDA_ENVS_PATH
+export CONDA_ENVS_PATH={{ scratch_root }}/.conda_envs:$CONDA_ENVS_PATH
 conda activate {{ conda_env }}
 python {{ script }} {{ args }}
 {% else %}
@@ -40,5 +33,5 @@ python {{ script }} {{ args }}
 
 # === Record Completion ===
 EXIT_CODE=$?
-echo "EXPERIMENT_DONE: $EXPERIMENT_ID exit_code=${EXIT_CODE}" >> /scratch/{{ user }}/logs/completed.log
+echo "EXPERIMENT_DONE: $EXPERIMENT_ID exit_code=${EXIT_CODE}" >> {{ scratch_root }}/logs/completed.log
 exit ${EXIT_CODE}
