@@ -1,0 +1,42 @@
+#!/bin/bash
+{% include '_sbatch_header.j2' %}
+{%- if dependency_job_id %}
+#SBATCH --dependency=afterok:{{ dependency_job_id }}
+{%- endif %}
+#SBATCH -o {{ scratch_root }}/logs/%x_%j.out
+#SBATCH -e {{ scratch_root }}/logs/%x_%j.err
+
+# === Environment Setup ===
+{% for mod in modules %}
+module load {{ mod }}
+{% endfor %}
+
+# === Working Directory ===
+cd {{ scratch_root }}/projects/{{ project }}
+
+# === Stage: {{ stage_name }} ===
+export EXPERIMENT_ID="{{ exp_id }}"
+export STAGE_NAME="{{ stage_name }}"
+export CONFIG_PATH="{{ config_path }}"
+export WANDB_MODE=offline
+
+# === Python invocation ===
+# Wraps `python {script} {args}` according to environment.type declared in the
+# experiment.yaml. Without this branch, the host system python is used and
+# every import from the user's environment fails immediately.
+{% if env_type == "apptainer" %}
+apptainer exec --nv \
+    {{ env_container }} \
+    python {{ script }} {{ args }}
+{% elif env_type == "conda" %}
+module load use.own
+module load conda-env/{{ conda_env }}
+python {{ script }} {{ args }}
+{% else %}
+# Fallback: rely on PATH/modules already loaded above.
+python {{ script }} {{ args }}
+{% endif %}
+
+EXIT_CODE=$?
+echo "STAGE_DONE: ${STAGE_NAME} exp=${EXPERIMENT_ID} exit_code=${EXIT_CODE}" >> {{ scratch_root }}/logs/completed.log
+exit ${EXIT_CODE}

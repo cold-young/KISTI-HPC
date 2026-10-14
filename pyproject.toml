@@ -3,9 +3,9 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "neuron-cli"
+name = "rcac-cli"
 version = "0.1.0"
-description = "Workflow CLIs for KISTI Neuron and Purdue RCAC Gilbreth HPC clusters"
+description = "RCAC HPC workflow automation CLI"
 requires-python = ">=3.9"
 dependencies = [
     "click>=8.0",
@@ -19,21 +19,23 @@ dependencies = [
 dev = [
     "pytest>=7.0",
     "pytest-cov",
+    "build",
 ]
 
 [project.scripts]
-neuron-connect = "neuron_cli.connect:connect"
-neuron-status = "neuron_cli.connect:status"
-neuron-disconnect = "neuron_cli.connect:disconnect"
-neuron-sync = "neuron_cli.sync:cli"
-neuron-env = "neuron_cli.env:cli"
-neuron-exp = "neuron_cli.experiment:cli"
-neuron-results = "neuron_cli.results:cli"
-neuron-container = "neuron_cli.container:cli"
-neuron-partition = "neuron_cli.partition_selector:select_partition"
-neuron-keepalive = "neuron_cli.keepalive:cli"
-neuron-notify = "neuron_cli.notify:cli"
-neuron-sim = "neuron_cli.simulator:cli"
+rcac-connect = "rcac_cli.connect:connect"
+rcac-status = "rcac_cli.connect:status"
+rcac-disconnect = "rcac_cli.connect:disconnect"
+rcac-sync = "rcac_cli.sync:cli"
+rcac-env = "rcac_cli.env:cli"
+rcac-exp = "rcac_cli.experiment:cli"
+rcac-results = "rcac_cli.results:cli"
+rcac-container = "rcac_cli.container:cli"
+rcac-partition = "rcac_cli.partition_selector:select_partition"
+rcac-keepalive = "rcac_cli.keepalive:cli"
+rcac-notify = "rcac_cli.notify:cli"
+rcac-sim = "rcac_cli.simulator:cli"
+# gilbreth-cli: the live-verified sibling implementation (see docs/GILBRETH.md)
 gilbreth-connect = "gilbreth_cli.connect:connect"
 gilbreth-status = "gilbreth_cli.connect:status"
 gilbreth-disconnect = "gilbreth_cli.connect:disconnect"
@@ -45,4 +47,25 @@ gilbreth-shell = "gilbreth_cli.run:shell"
 gilbreth-info = "gilbreth_cli.info:cli"
 
 [tool.setuptools.packages.find]
-include = ["neuron_cli*", "gilbreth_cli*"]
+include = ["rcac_cli*", "gilbreth_cli*"]
+
+# B3/R2: the wheel shipped neither templates nor configs, so an installed
+# rcac-cli could not render a script or find a config. Both directories now
+# live inside the package and are declared here AND in MANIFEST.in.
+[tool.setuptools.package-data]
+rcac_cli = ["templates/*.j2", "configs/*.yaml"]
+
+# AC-7.6.  The offline gate is `pytest -q --strict-markers`, so every marker the
+# suite uses has to be declared here or the run fails on an unknown marker.
+#
+# `unverified_fixture` is a PROVENANCE LABEL, NEVER A SKIP CONDITION.  The tests
+# carrying it run and must pass: they exercise the parsers in
+# `rcac_cli/discovery.py` against doc-derived sample output, which proves the
+# parser handles the documented shape and proves nothing whatever about the
+# cluster.  Plan section 6.2 rows L5/L5b replace those fixtures with real
+# captures from a login node; the marker is how you find every assertion that
+# has to be re-read when they do.  Nothing in the suite calls `pytest.skip`.
+[tool.pytest.ini_options]
+markers = [
+    "unverified_fixture: reads a doc-derived fixture under tests/fixtures/ that has never been captured from a live Gilbreth login node (plan R13, rows L5/L5b). Provenance label only -- the test runs and must pass.",
+]

@@ -1,0 +1,20 @@
+# PROVENANCE: doc-derived.  NOT captured from a live Gilbreth login node.
+# `sinfo -o '%P %a %D %T %N %G' --noheader` -- the field order below is that
+# format string's, and the format string is SLURM's own, so this is the one
+# probe whose *shape* is not in question.  The partition names, node counts and
+# node-name ranges are reconstructed from the queues page
+#   https://docs.rcac.purdue.edu/userguides/gilbreth/run_jobs/queues/
+# and are therefore plausible rather than true (plan R13).
+# Note what is NOT here: no h100 line.  The queues page does not list that
+# partition, so inventing a line for it would have destroyed the AC-4.9
+# contradiction that slist.txt preserves.
+# Tests reading this file carry @pytest.mark.unverified_fixture.
+# Plan section 6.2 replaces it with a real capture.
+a10 up 12 idle gilbreth-a[000-011] gpu:A10:3
+a10 up 4 mix gilbreth-a[012-015] gpu:A10:3
+a30 up 8 alloc gilbreth-b[000-007] gpu:A30:3
+a30 up 2 down gilbreth-b[008-009] gpu:A30:3
+a100-40gb up 6 idle gilbreth-g[000-005] gpu:A100:2
+a100-40gb up 4 mix gilbreth-n[000-003] gpu:A100:4
+a100-80gb up 2 idle gilbreth-i[000-001] gpu:A100:2
+training up 4 idle gilbreth-j[000-003] gpu:A100:4

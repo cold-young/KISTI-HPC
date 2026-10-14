@@ -1,0 +1,13 @@
+# PROVENANCE: doc-derived.  NOT captured from a live Gilbreth login node.
+# `myquota`, reconstructed from the storage page
+#   https://docs.rcac.purdue.edu/userguides/gilbreth/storage/
+# The numbers are illustrative.  What matters to the parser is the *shape*:
+# a whitespace-column table with a rule line, and -- deliberately preserved --
+# TWO columns headed `Use%` and two headed `Used`.  That duplication is what
+# broke the dict-shaped rows C5 shipped, and what C6's positional `TableRow`
+# exists to survive; see the tests that pin both halves.
+# Tests reading this file carry @pytest.mark.unverified_fixture.
+Type     Location    Size    Used   Avail    Use%     Files    Used    Limit    Use%
+=======  =========  ======  ======  ======  ======  ========  ======  =======  ======
+home     myusername   25GB  16.3GB   8.7GB     65%         -       -        -       -
+scratch  myusername  200TB   1.2TB   199TB      1%         -  47,113  2000000      2%

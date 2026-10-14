@@ -1,0 +1,33 @@
+#!/bin/sh
+# Block any commit that would publish a real Purdue credential (AC-2.6).
+#
+# Install (one line, from the repo root):
+#
+#     git config core.hooksPath .githooks
+#
+# Uninstall:  git config --unset core.hooksPath
+# Bypass once (do this only if you know why): git commit --no-verify
+#
+# CI runs the same check on every push. This hook is what stops a credential
+# before it is committed at all; CI can only report one that already landed,
+# and a rewrite of published history is a far worse day than a refused commit.
+set -e
+
+root=$(git rev-parse --show-toplevel)
+
+# Prefer the project venv: scripts/check_credentials.py needs PyYAML, and a
+# bare python3 may not have it. Failing to run the check must not look like
+# passing it, so an unusable interpreter exits non-zero below.
+if [ -x "$root/.venv/bin/python" ]; then
+    python="$root/.venv/bin/python"
+else
+    python=$(command -v python3 || command -v python)
+fi
+
+if [ -z "$python" ]; then
+    echo "pre-commit: no python interpreter found; cannot verify credentials." >&2
+    echo "pre-commit: fix your environment or re-run with --no-verify." >&2
+    exit 1
+fi
+
+exec "$python" "$root/scripts/check_credentials.py" --staged

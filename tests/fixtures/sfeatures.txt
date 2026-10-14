@@ -1,0 +1,18 @@
+# PROVENANCE: doc-derived, and the thinnest evidence of the three.
+# NOT captured from a live Gilbreth login node.
+# RCAC does not publish `sfeatures`'s column layout anywhere; this file
+# reconstructs it from the node descriptions on
+#   https://docs.rcac.purdue.edu/userguides/gilbreth/run_jobs/queues/
+# and from the `--constraint=nvlink` guidance the same page gives for the
+# a100-40gb N nodes.  The column *names* are a guess.  Plan section 6.2 row L5
+# is the live check that replaces this file:
+#   sfeatures | tee tests/fixtures/sfeatures.txt
+# Tests reading this file carry @pytest.mark.unverified_fixture.  The one
+# question the parser is asked today is whether `nvlink` is a real feature
+# name on this cluster, and that answer is exactly what L5 confirms.
+NODELIST             CPUS  MEMORY   AVAIL_FEATURES       GRES
+gilbreth-a[000-015]   128  512000   A,a10                gpu:A10:3
+gilbreth-b[000-009]   128  512000   B,a30                gpu:A30:3
+gilbreth-g[000-005]   128  510000   G,a100-40gb          gpu:A100:2
+gilbreth-n[000-003]   128  1000000  N,a100-40gb,nvlink   gpu:A100:4
+gilbreth-i[000-001]    32  256000   I,a100-80gb          gpu:A100:2

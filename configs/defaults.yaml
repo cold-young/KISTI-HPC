@@ -1,13 +1,50 @@
-# SLURM 기본 옵션
-slurm:
-  partition: amd_a100nv_8
-  nodes: 1
-  gpus: 2
-  cpus_per_gpu: 8
-  time: "24:00:00"
-  comment: pytorch
+# Defaults for `rcac-exp launch`, layered under an experiment.yaml.
+#
+# Precedence: CLI flag > experiment.yaml `slurm:` > this file > the literal
+# fallback in rcac_cli/experiment.py.
 
-# 동기화 제외 패턴
+slurm:
+  # Gilbreth needs THREE submission flags that mean different things:
+  #   -A  the account the job is billed to  (slurm.account / RCAC_ACCOUNT)
+  #   -p  the partition, which selects the GPU TYPE  (slurm.partition)
+  #   -q  the QOS: normal | standby | training       (slurm.qos)
+  #
+  # `account` and `partition` deliberately have NO default here.
+  #   - The account is a credential; it comes from RCAC_ACCOUNT or
+  #     configs/rcac.yaml, never from a shared defaults file.
+  #   - Which partitions you may use depends on your account, so a default
+  #     would silently run somebody's job on hardware they did not choose.
+  #     Run `slist` on the cluster to see yours. Documented partitions:
+  #     a10, a30, a100-40gb, a100-80gb, training.
+  #
+  # `time` has no default either. Gilbreth's own default walltime is 30
+  # minutes, which will kill essentially any real job, so rcac-cli requires
+  # --time explicitly rather than picking a number for you.
+  qos: normal
+  nodes: 1
+  gpus_per_node: 1
+  # `cpus_per_gpu` is a *request*, not an RCAC-documented figure, for the same
+  # reason `mem` below is: no Gilbreth page checked states a CPU-per-GPU ratio,
+  # a minimum, or a maximum. 8 is a conservative guess -- ask for more than the
+  # node can give per GPU and the job never starts; ask for too few and the
+  # data loader starves the GPU you are paying for. Set it per experiment in
+  # your `slurm:` block once you have measured your own loader.
+  #
+  # It is also the one directive that does NOT come from a
+  # rcac_cli.gilbreth.SubmissionPlan -- it is threaded straight to the template
+  # (see the header comment in rcac_cli/templates/_sbatch_header.j2). That is
+  # deliberate rather than an oversight: build_directives() exists to enforce
+  # Gilbreth's documented rules, and there is no documented rule here to
+  # enforce. If RCAC ever publishes one, this value has to move behind the
+  # choke point with it.
+  cpus_per_gpu: 8
+  # `mem` is intentionally unset: --mem is required by SLURM, and when it is
+  # omitted here rcac_cli.gilbreth sizes it as gpus_per_node x 32G. That 32G
+  # is a conservative *request*, not an RCAC-documented figure -- an
+  # over-request queues longer and an under-request is OOM-killed, and either
+  # way the job fails loudly. Set `mem: 64G` (etc.) to override.
+
+# Sync exclusion patterns
 sync:
   exclude:
     - ".git/"
@@ -31,16 +68,18 @@ sync:
     - "experiments/*/checkpoints/best_model.pth"
     - "experiments/summary.csv"
 
-# 환경 기본 모듈
-# Neuron은 module load conda/pytorch_* 로 사전빌드 환경을 제공
-# 사용자 conda 환경은 /apps/applications/Miniconda/25.11.1/bin/conda 사용
 environment:
-  conda_path: "/apps/applications/Miniconda/25.11.1/bin/conda"
-  # SLURM 학습 시 기본 모듈 (conda/pytorch 모듈이 PyTorch+CUDA 환경 제공)
-  default_modules:
-    - conda/pytorch_2.9.1_cuda12
-  # 사용 가능한 사전빌드 환경:
-  #   conda/pytorch_2.9.1_cuda12  - PyTorch 2.9.1 + CUDA 12
-  #   conda/pytorch_2.9.1_cuda13  - PyTorch 2.9.1 + CUDA 13
-  #   conda/tensorflow_2.20.0     - TensorFlow 2.20.0
-  #   cuda/12.4.1                 - CUDA only (no Python)
+  # `conda_path` was dropped: it pointed at a conda install on the PREVIOUS
+  # cluster. Gilbreth's Python environments are built with `conda-env-mod`
+  # after `module load anaconda`, which is what `rcac-env setup` will drive.
+  # Modules prepended to every generated job script.
+  #
+  # EMPTY ON PURPOSE. The previous entry named a pre-built module from the
+  # PREVIOUS cluster and the comment above it claimed RCAC ships the same
+  # thing; neither is true for Gilbreth, and a `module load` of a module that
+  # does not exist fails every job at line one. RCAC's guidance is explicit:
+  # do not invent module names or versions.
+  #
+  # Fill this in only with names `module avail` / `module spider` actually
+  # printed on Gilbreth. `rcac-env modules` queries them for you.
+  default_modules: []

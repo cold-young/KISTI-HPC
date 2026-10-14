@@ -1,0 +1,14 @@
+# PROVENANCE: doc-derived.  NOT captured from a live Gilbreth login node.
+# `purgelist`, reconstructed from the scratch-retention section of
+#   https://docs.rcac.purdue.edu/userguides/gilbreth/storage/
+# The preamble and the summary footer are the point of the fixture: the parser
+# keeps absolute paths and nothing else, so a sentence that happens to mention
+# a path must not come back as a file.  The retention window quoted is 60 days
+# (AC-6.1); the paths are illustrative.
+# Tests reading this file carry @pytest.mark.unverified_fixture.
+The following files in /scratch/gilbreth/myusername are older than 60 days
+and are eligible for purge:
+/scratch/gilbreth/myusername/old_run/checkpoint_0001.pt
+/scratch/gilbreth/myusername/old_run/checkpoint_0002.pt
+/scratch/gilbreth/myusername/logs/train.log
+2 directories, 3 files, 1.2 TB eligible.

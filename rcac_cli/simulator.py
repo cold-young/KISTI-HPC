@@ -1,0 +1,740 @@
+"""Simulator integration for Genesis, MuJoCo, and Isaac Gym on RCAC HPC.
+
+Provides environment validation, data generation pipeline support,
+and simulator-specific SLURM configuration helpers.
+"""
+
+from __future__ import annotations
+
+import subprocess
+import sys
+from pathlib import Path
+
+import click
+import yaml
+
+from .config import (
+    get_rcac_config,
+    require_account,
+    require_user,
+    resolve_path,
+    scratch_root,
+)
+from .gilbreth import (
+    DEFAULT_QOS,
+    PARTITION_GPU,
+    PARTITION_HINTS,
+    build_directives,
+    emit_warnings,
+)
+from .ssh import ssh_cmd
+
+# Simulator compatibility matrix for Gilbreth's GPUs.
+#
+# `slurm_comment` is gone from every entry.  It fed `sbatch --comment`, which
+# on the previous cluster annotated a job class the scheduler acted on;
+# Gilbreth has no such flag and no such job classes, so the value was a label
+# with nothing to label.  `check_compatibility` no longer returns it and
+# `rcac-sim compat` no longer prints a `--comment` line the user would have
+# pasted into a submission that rejects it.
+#
+# `rt_core_required` is the only per-simulator GPU constraint left, and it is
+# unresolved rather than false: RCAC does not document whether Gilbreth's A10
+# nodes expose RT cores, so Isaac Sim is refused until plan section 6.2 row
+# L16 (`nvidia-smi -q | grep -i rt` in a `-p a10` job) answers it.  That is the
+# same `verified: False` posture `gilbreth.PARTITION_HINTS` takes, and the a10
+# hint carries the matching note.
+SIMULATOR_COMPAT = {
+    "genesis": {
+        "display_name": "Genesis",
+        "rt_core_required": False,
+        "container": "genesis-sim.sif",
+        "pip_package": "genesis-world",
+        "notes": "Pure CUDA, no RT Core needed. 10-80x faster than Isaac Gym.",
+    },
+    "mujoco": {
+        "display_name": "MuJoCo (MJX)",
+        "rt_core_required": False,
+        "container": None,
+        "pip_package": "mujoco",
+        "notes": "GPU accel via MJX (JAX backend). Broad physics sim.",
+    },
+    "isaac_gym": {
+        "display_name": "Isaac Gym Preview",
+        "rt_core_required": False,
+        "container": "isaacgym-preview.sif",
+        "pip_package": None,  # manual install from NVIDIA
+        "notes": "DEPRECATED. Use for legacy code only. Pin via an Apptainer image.",
+    },
+    "isaac_sim": {
+        "display_name": "Isaac Sim",
+        "rt_core_required": True,
+        "container": None,
+        "pip_package": None,
+        "notes": (
+            "Needs RT Core GPUs. Unconfirmed on Gilbreth's A10 nodes -- plan "
+            "section 6.2 row L16 -- and an unconfirmed yes is a no."
+        ),
+    },
+    "pybullet": {
+        "display_name": "PyBullet",
+        "rt_core_required": False,
+        "container": None,
+        "pip_package": "pybullet",
+        "notes": "Lightweight sim. Limited GPU acceleration.",
+    },
+}
+
+# B8/AC-4.4: the partition -> GPU-type map is imported, not kept.  The copy
+# that lived here was keyed by the *previous* cluster's partition names, so
+# `rcac-sim init-pipeline -p a10` -- a real Gilbreth partition -- exited 1 with
+# "Unknown partition: a10".  Every valid Gilbreth partition was rejected and
+# every invalid one was accepted, which is what a second copy of a table buys
+# once the first one moves: the two cannot drift, because they cannot even be
+# compared.  `gilbreth.PARTITION_GPU` is derived from `PARTITION_HINTS`, so
+# there is now exactly one place a partition name is written down.
+
+# --------------------------------------------------------------------------
+# What `init-pipeline` asks for on behalf of the user (AC-3.19(b))
+#
+# These three were inline in the `slurm:` dict literal this command wrote into
+# generated YAML.  They are named here because that dict is now built by
+# `SubmissionPlan.to_slurm_dict()`, and the values it is built *from* are the
+# only thing this module still chooses.
+# --------------------------------------------------------------------------
+
+#: A day of data generation.  Legal under `-q normal` (14-day cap) and under
+#: `-q training`; `build_directives` is what knows that, not this module.
+PIPELINE_WALLTIME = "24:00:00"
+
+#: Two GPUs per node, as the pre-port `gpus: 2` asked for.  Written out as
+#: `gpus_per_node`, which is Gilbreth's documented request form -- the old
+#: spelling reached `rcac-exp launch` as a deprecation warning on a file this
+#: command had just generated.
+PIPELINE_GPUS_PER_NODE = 2
+
+#: No documented Gilbreth rule constrains this, so it is not on the plan and
+#: is added to the mapping afterwards.
+PIPELINE_CPUS_PER_GPU = 8
+
+#: AC-5.10's pointer comment.  ``environment.modules`` is generated empty, and
+#: ``yaml.dump`` cannot carry a comment, so the explanation is written ahead of
+#: the document -- in the file the user actually edits, rather than only in the
+#: terminal output they have already scrolled past.
+GENERATED_MANIFEST_HEADER = (
+    "# Generated by `rcac-sim init-pipeline`.\n"
+    "#\n"
+    "# `environment.modules:` is empty on purpose. No module name is written\n"
+    "# here that Gilbreth has not printed: run `rcac-env modules`, then paste\n"
+    "# back only names `module avail` / `module spider` actually listed.\n"
+    "# A `module load` of a module that does not exist fails the job at its\n"
+    "# first line.\n"
+)
+
+
+def _run_remote(cfg: dict, command: str) -> subprocess.CompletedProcess:
+    cmd = [*ssh_cmd(cfg), command]
+    return subprocess.run(cmd, capture_output=True, text=True)
+
+
+def check_compatibility(simulator: str, partition: str) -> dict:
+    """Check if a simulator is compatible with a given partition's GPU."""
+    sim = SIMULATOR_COMPAT.get(simulator)
+    if not sim:
+        return {"compatible": False, "reason": f"Unknown simulator: {simulator}"}
+
+    gpu_type = PARTITION_GPU.get(partition)
+    if not gpu_type:
+        return {
+            "compatible": False,
+            "reason": (
+                f"Unknown partition: {partition}. Gilbreth's documented "
+                f"partitions are {', '.join(sorted(PARTITION_HINTS))}."
+            ),
+        }
+
+    # The per-GPU support matrix this used to consult is gone along with the
+    # partition map that keyed it.  It listed the previous cluster's GPU types
+    # and said "yes, CUDA works" for every one of them, which is neither a fact
+    # about Gilbreth nor a fact worth a table.  The one real constraint is the
+    # RT cores Isaac Sim needs: RCAC does not document whether Gilbreth's A10
+    # nodes expose them (plan section 6.2 row L16), and an unconfirmed yes is a
+    # no here -- a generated manifest that cannot run is worse than a refusal
+    # that names its reason.
+    if sim["rt_core_required"]:
+        return {
+            "compatible": False,
+            "reason": (
+                f"{sim['display_name']} needs RT Core GPUs, and no Gilbreth "
+                f"partition is documented as providing them ({gpu_type} on "
+                f"{partition}). {sim['notes']}"
+            ),
+        }
+
+    # No `partition` key: it echoed back an argument every caller already had,
+    # and after C3c a dict carrying that key is a *submission*, which this is
+    # not -- this is a compatibility report.  AC-3.19(b) reads the distinction
+    # structurally, so the dead key had to go rather than be excused.
+    return {
+        "compatible": True,
+        "simulator": sim["display_name"],
+        "gpu": gpu_type,
+        "container": sim["container"],
+    }
+
+
+@click.group()
+def cli() -> None:
+    """Simulator management for RCAC HPC."""
+
+
+@cli.command("compat")
+@click.argument("simulator", type=click.Choice(list(SIMULATOR_COMPAT.keys())))
+@click.option("--partition", "-p", default="a100-80gb",
+              help="Target partition (the GPU type). One of: "
+                   "a10, a30, a100-40gb, a100-80gb, training.")
+def check_compat(simulator: str, partition: str) -> None:
+    """Check simulator compatibility with a RCAC partition."""
+    result = check_compatibility(simulator, partition)
+
+    if result["compatible"]:
+        click.echo(f"{result['simulator']}: COMPATIBLE with {result['gpu']} ({partition})")
+        if result.get("container"):
+            click.echo(f"  Recommended container: {result['container']}")
+    else:
+        click.echo(f"INCOMPATIBLE: {result['reason']}")
+
+
+@cli.command("list")
+def list_simulators() -> None:
+    """Show all simulators and their RCAC GPU compatibility."""
+    # One column, not three.  The three it printed were V100/A100/H200 -- two
+    # GPUs this cluster does not have and one it does -- and after the per-GPU
+    # support matrix went (see `check_compatibility`) the remaining answer is
+    # the same for every GPU Gilbreth offers, so three identical columns would
+    # only imply a distinction that is not being made.
+    click.echo(f"{'Simulator':<22} {'Gilbreth':<10} {'Notes'}")
+    click.echo("-" * 90)
+
+    for key, sim in SIMULATOR_COMPAT.items():
+        supported = "NO" if sim["rt_core_required"] else "OK"
+        click.echo(f"{sim['display_name']:<22} {supported:<10} {sim['notes']}")
+
+
+@cli.command("check-env")
+@click.argument("simulator", type=click.Choice(["genesis", "mujoco", "isaac_gym", "pybullet"]))
+def check_env(simulator: str) -> None:
+    """Verify simulator is installed on RCAC."""
+    cfg = get_rcac_config()
+
+    require_user(cfg)
+
+    sim = SIMULATOR_COMPAT[simulator]
+    pkg = sim["pip_package"]
+
+    if not pkg:
+        click.echo(f"{sim['display_name']} requires manual installation.")
+        if simulator == "isaac_gym":
+            click.echo("  Download from NVIDIA and install into an Apptainer image.")
+            click.echo("  See: containers/isaacgym-preview.def")
+        return
+
+    result = _run_remote(cfg, f"python -c 'import {pkg.replace('-', '_')}; print(\"OK\")' 2>&1")
+
+    if "OK" in result.stdout:
+        click.echo(f"{sim['display_name']}: INSTALLED")
+    else:
+        click.echo(f"{sim['display_name']}: NOT FOUND")
+        click.echo(f"  Install: pip install {pkg}")
+        if sim["container"]:
+            click.echo(f"  Or use container: rcac-container build containers/{sim['container'].replace('.sif', '.def')}")
+
+
+@cli.command("init-pipeline")
+@click.argument("simulator", type=click.Choice(["genesis", "mujoco", "isaac_gym"]))
+@click.option("--env", "env_name", default="manipulation", help="Environment name")
+@click.option("--episodes", default=10000, help="Number of data generation episodes")
+@click.option("--output", "-o", default="experiment_sim.yaml", help="Output experiment file")
+@click.option("--partition", "-p", default="a100-80gb",
+              help="Target partition (the GPU type) written into the "
+                   "generated slurm: block. One of: a10, a30, "
+                   "a100-40gb, a100-80gb, training.")
+def init_pipeline(simulator: str, env_name: str, episodes: int, output: str, partition: str) -> None:
+    """Generate a simulation -> training -> evaluation experiment.yaml.
+
+    The ``slurm:`` block is validated **here**, at generation time, not at
+    ``rcac-exp launch`` (AC-3.19(b)).  This command builds no batch header at
+    all, which is exactly why it was the bypass a scan for directive literals
+    cannot see: it writes directive *values* into a YAML file, and an illegal
+    partition/QOS pair in that file survives happily until someone submits it
+    -- possibly on another machine, days later, having assumed that a
+    generated file was a valid one.
+    """
+    cfg = get_rcac_config()
+
+    # Validated before the compatibility check, and before anything is
+    # written.  An illegal submission is illegal regardless of which simulator
+    # asked for it, and the file must not exist if it cannot be launched.
+    plan = build_directives(
+        account=require_account(cfg),
+        partition=partition,
+        qos=DEFAULT_QOS,
+        time=PIPELINE_WALLTIME,
+        gpus_per_node=PIPELINE_GPUS_PER_NODE,
+        nodes=1,
+    )
+    emit_warnings(plan.warnings)
+
+    compat = check_compatibility(simulator, partition)
+    if not compat["compatible"]:
+        click.echo(f"Error: {compat['reason']}")
+        sys.exit(1)
+
+    sim = SIMULATOR_COMPAT[simulator]
+
+    slurm = plan.to_slurm_dict()
+    # The account is validated but not written.  `rcac-exp launch` resolves it
+    # from RCAC_ACCOUNT / the config *ahead* of the manifest precisely so a
+    # user is never nudged into committing their allocation into a file they
+    # share (P4), so writing it here would be both ignored and a leak.
+    del slurm["account"]
+    slurm["cpus_per_gpu"] = PIPELINE_CPUS_PER_GPU
+
+    # Build the experiment YAML
+    experiment = {
+        "project": f"{env_name}_{simulator}",
+        "description": f"{sim['display_name']} simulation + training pipeline for {env_name}",
+        "slurm": slurm,
+        "environment": {
+            "type": "apptainer" if sim["container"] else "conda",
+            "name": f"{simulator}_env",
+            # AC-5.10: empty on purpose. `cuda/12.4.1` used to be written here
+            # -- an invented name that renders as a `module load` of a module
+            # Gilbreth does not have, failing the job at line one. C3b deleted
+            # it from `defaults.yaml` and both examples; this was the last
+            # producer still writing it. The pointer lives in
+            # GENERATED_MANIFEST_HEADER, which yaml.dump cannot carry.
+            "modules": [],
+        },
+        "base_params": {
+            "dataset": f"{resolve_path(cfg, 'data')}/{env_name}_{simulator}",
+            "epochs": 100,
+            "batch_size": 64,
+            "optimizer": "adamw",
+            "seed": 42,
+        },
+        # Stage args use only placeholders `rcac-exp launch` can actually
+        # resolve: `{config_path}`, `{config_dir}` and the manifest's own
+        # `base_params` keys.
+        #
+        # The generated manifest used to say `{generate_data.output_path}` and
+        # `{train.best_model}`. That syntax was never implemented and cannot
+        # be: the stages are separate `sbatch` submissions chained by
+        # `--dependency`, so `launch` has returned long before stage one runs
+        # and has nothing to read those values out of. `launch` rejected them
+        # with `unknown placeholder`, exit 2 -- so `rcac-sim init-pipeline`
+        # printed "To launch: rcac-exp launch ..." for a file that command
+        # refused. The two are composable again because every cross-stage value
+        # is now DERIVED the same way by both sides instead of observed:
+        #   * the dataset is `base_params.dataset`, which is also what
+        #     `train.py` falls back to when `--dataset` is absent;
+        #   * the checkpoint is `<config_dir>/checkpoints/best_model.pth`,
+        #     which is exactly where the scaffolded `train.py` writes it
+        #     (`Path(args.config).parent / "checkpoints"`).
+        # `examples/experiment_genesis.yaml`, the hand-written twin of this
+        # file, already spelled its stage args out this way.
+        "pipeline": [
+            {
+                "name": "generate_data",
+                "script": f"{simulator}_datagen.py",
+                "args": f"--env {env_name} --num_episodes {episodes} --output {{dataset}}",
+            },
+            {
+                "name": "train",
+                "script": "train.py",
+                "depends_on": "generate_data",
+                "args": "--config {config_path} --dataset {dataset}",
+            },
+            {
+                "name": "evaluate_sim",
+                "script": f"{simulator}_eval.py",
+                "depends_on": "train",
+                "args": "--checkpoint {config_dir}/checkpoints/best_model.pth --env "
+                + env_name,
+            },
+        ],
+    }
+
+    # Add container config if applicable
+    if sim["container"]:
+        experiment["environment"]["container"] = (
+            f"{scratch_root(cfg)}/.rcac-tools/{sim['container']}"
+        )
+
+    with open(output, "w") as f:
+        f.write(GENERATED_MANIFEST_HEADER)
+        yaml.dump(experiment, f, default_flow_style=False, sort_keys=False)
+
+    click.echo(f"Pipeline experiment file created: {output}")
+    click.echo("\nPipeline stages:")
+    for i, stage in enumerate(experiment["pipeline"], 1):
+        dep = f" (after: {stage['depends_on']})" if stage.get("depends_on") else ""
+        click.echo(f"  {i}. {stage['name']}: {stage['script']}{dep}")
+    click.echo(f"\nTo launch: rcac-exp launch {output}")
+    click.echo(f"To dry-run: rcac-exp launch {output} --dry-run")
+
+
+@cli.command("scaffold")
+@click.argument("simulator", type=click.Choice(["genesis", "mujoco", "isaac_gym"]))
+@click.option("--env", "env_name", default="manipulation", help="Environment name")
+@click.option("--output-dir", "-o", default=".", help="Output directory for scaffold files")
+def scaffold(simulator: str, env_name: str, output_dir: str) -> None:
+    """Generate starter Python scripts for a sim-to-real pipeline."""
+    out = Path(output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+
+    sim = SIMULATOR_COMPAT[simulator]
+
+    # Data generation script
+    datagen_file = out / f"{simulator}_datagen.py"
+    datagen_file.write_text(_scaffold_datagen(simulator, env_name))
+    click.echo(f"  Created: {datagen_file}")
+
+    # Evaluation script
+    eval_file = out / f"{simulator}_eval.py"
+    eval_file.write_text(_scaffold_eval(simulator, env_name))
+    click.echo(f"  Created: {eval_file}")
+
+    # Train script (generic)
+    train_file = out / "train.py"
+    if not train_file.exists():
+        train_file.write_text(_scaffold_train())
+        click.echo(f"  Created: {train_file}")
+
+    click.echo(f"\nScaffold complete for {sim['display_name']} / {env_name}")
+    click.echo(f"Next: rcac-sim init-pipeline {simulator} --env {env_name}")
+
+
+def _scaffold_datagen(simulator: str, env_name: str) -> str:
+    """Generate a data generation script template."""
+    if simulator == "genesis":
+        return f'''"""Genesis data generation for {env_name}."""
+
+import argparse
+import json
+from pathlib import Path
+
+import numpy as np
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--env", default="{env_name}")
+    parser.add_argument("--num_episodes", type=int, default=10000)
+    parser.add_argument("--num_envs", type=int, default=256)
+    parser.add_argument("--output", default="generated_data")
+    parser.add_argument("--config", default=None)
+    args = parser.parse_args()
+
+    output_dir = Path(args.output)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        import genesis as gs
+        gs.init(backend=gs.cuda)
+
+        # TODO: Define your Genesis scene and robot
+        # scene = gs.Scene(...)
+        # robot = scene.add_entity(gs.Morphology(...))
+
+        print(f"Generating {{args.num_episodes}} episodes with {{args.num_envs}} parallel envs...")
+
+        all_observations = []
+        all_actions = []
+
+        for ep in range(0, args.num_episodes, args.num_envs):
+            batch_size = min(args.num_envs, args.num_episodes - ep)
+            # TODO: Run simulation and collect data
+            # obs, actions = run_episode_batch(scene, robot, batch_size)
+            # all_observations.append(obs)
+            # all_actions.append(actions)
+
+            if (ep + batch_size) % 1000 == 0:
+                print(f"  Episodes: {{ep + batch_size}}/{{args.num_episodes}}")
+
+        # Save collected data
+        # np.savez(output_dir / "dataset.npz",
+        #          observations=np.concatenate(all_observations),
+        #          actions=np.concatenate(all_actions))
+
+        metadata = {{
+            "simulator": "genesis",
+            "env": args.env,
+            "num_episodes": args.num_episodes,
+            "output_path": str(output_dir),
+        }}
+        with open(output_dir / "metadata.json", "w") as f:
+            json.dump(metadata, f, indent=2)
+
+        print(f"Data saved to {{output_dir}}")
+
+    except ImportError:
+        print("ERROR: Genesis not installed. Run: pip install genesis-world")
+        raise SystemExit(1)
+
+if __name__ == "__main__":
+    main()
+'''
+    elif simulator == "mujoco":
+        return f'''"""MuJoCo data generation for {env_name}."""
+
+import argparse
+import json
+from pathlib import Path
+
+import numpy as np
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--env", default="{env_name}")
+    parser.add_argument("--num_episodes", type=int, default=10000)
+    parser.add_argument("--output", default="generated_data")
+    parser.add_argument("--config", default=None)
+    args = parser.parse_args()
+
+    output_dir = Path(args.output)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        import mujoco
+
+        # TODO: Load your MuJoCo model
+        # model = mujoco.MjModel.from_xml_path("your_model.xml")
+        # data = mujoco.MjData(model)
+
+        print(f"Generating {{args.num_episodes}} episodes...")
+
+        for ep in range(args.num_episodes):
+            # TODO: Run episode, collect observations and actions
+            # mujoco.mj_step(model, data)
+            pass
+
+        metadata = {{
+            "simulator": "mujoco",
+            "env": args.env,
+            "num_episodes": args.num_episodes,
+            "output_path": str(output_dir),
+        }}
+        with open(output_dir / "metadata.json", "w") as f:
+            json.dump(metadata, f, indent=2)
+
+        print(f"Data saved to {{output_dir}}")
+
+    except ImportError:
+        print("ERROR: MuJoCo not installed. Run: pip install mujoco")
+        raise SystemExit(1)
+
+if __name__ == "__main__":
+    main()
+'''
+    else:  # isaac_gym
+        return f'''"""Isaac Gym Preview data generation for {env_name}."""
+
+import argparse
+import json
+from pathlib import Path
+
+import numpy as np
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--env", default="{env_name}")
+    parser.add_argument("--num_episodes", type=int, default=10000)
+    parser.add_argument("--num_envs", type=int, default=256)
+    parser.add_argument("--output", default="generated_data")
+    parser.add_argument("--config", default=None)
+    args = parser.parse_args()
+
+    output_dir = Path(args.output)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        from isaacgym import gymapi
+
+        gym = gymapi.acquire_gym()
+        sim_params = gymapi.SimParams()
+        sim_params.use_gpu_pipeline = True
+
+        # TODO: Create sim and environment
+        # sim = gym.create_sim(0, 0, gymapi.SIM_PHYSX, sim_params)
+
+        print(f"Generating {{args.num_episodes}} episodes with {{args.num_envs}} parallel envs...")
+        print("NOTE: Isaac Gym Preview is deprecated. Consider migrating to Genesis.")
+
+        metadata = {{
+            "simulator": "isaac_gym",
+            "env": args.env,
+            "num_episodes": args.num_episodes,
+            "output_path": str(output_dir),
+        }}
+        with open(output_dir / "metadata.json", "w") as f:
+            json.dump(metadata, f, indent=2)
+
+        print(f"Data saved to {{output_dir}}")
+
+    except ImportError:
+        print("ERROR: Isaac Gym not installed. Install from NVIDIA package.")
+        raise SystemExit(1)
+
+if __name__ == "__main__":
+    main()
+'''
+
+
+def _scaffold_eval(simulator: str, env_name: str) -> str:
+    """Generate an evaluation script template."""
+    return f'''"""Simulation evaluation for {env_name} using {simulator}."""
+
+import argparse
+import json
+from pathlib import Path
+
+import numpy as np
+import torch
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--checkpoint", required=True, help="Path to model checkpoint")
+    parser.add_argument("--env", default="{env_name}")
+    parser.add_argument("--num_episodes", type=int, default=100)
+    parser.add_argument("--config", default=None)
+    args = parser.parse_args()
+
+    print(f"Evaluating {{args.checkpoint}} in {{args.env}}...")
+
+    # Load model
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # model = YourModel()
+    # model.load_state_dict(torch.load(args.checkpoint, map_location=device))
+    # model.eval()
+
+    # TODO: Run evaluation episodes in simulation
+    success_count = 0
+    total_reward = 0.0
+
+    for ep in range(args.num_episodes):
+        # TODO: Reset environment, run policy, check success
+        # obs = env.reset()
+        # done = False
+        # while not done:
+        #     action = model(obs)
+        #     obs, reward, done, info = env.step(action)
+        #     total_reward += reward
+        # if info.get("success"):
+        #     success_count += 1
+        pass
+
+    results = {{
+        "checkpoint": args.checkpoint,
+        "env": args.env,
+        "num_episodes": args.num_episodes,
+        "success_rate": success_count / max(args.num_episodes, 1),
+        "avg_reward": total_reward / max(args.num_episodes, 1),
+        "accuracy": success_count / max(args.num_episodes, 1),  # alias for results.py
+    }}
+
+    output_path = Path(args.checkpoint).parent / "eval_results.json"
+    with open(output_path, "w") as f:
+        json.dump(results, f, indent=2)
+
+    print(f"Success rate: {{results['success_rate']:.2%}}")
+    print(f"Avg reward: {{results['avg_reward']:.2f}}")
+    print(f"Results saved to {{output_path}}")
+
+if __name__ == "__main__":
+    main()
+'''
+
+
+def _scaffold_train() -> str:
+    """Generate a generic training script template."""
+    return '''"""Generic training script for sim-to-real pipeline."""
+
+import argparse
+import json
+from pathlib import Path
+
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", required=True, help="Experiment config YAML")
+    parser.add_argument("--dataset", default=None, help="Dataset path override")
+    args = parser.parse_args()
+
+    import yaml
+    with open(args.config) as f:
+        config = yaml.safe_load(f)
+
+    dataset_path = args.dataset or config.get("dataset", "")
+    epochs = config.get("epochs", 100)
+    batch_size = config.get("batch_size", 64)
+    lr = config.get("learning_rate", 1e-4)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Training on {device}")
+    print(f"Config: epochs={epochs}, batch_size={batch_size}, lr={lr}")
+    print(f"Dataset: {dataset_path}")
+
+    # TODO: Load dataset
+    # dataset = YourDataset(dataset_path)
+    # dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+
+    # TODO: Define model
+    # model = YourModel(**config).to(device)
+    # optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+
+    checkpoint_dir = Path(args.config).parent / "checkpoints"
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+    best_loss = float("inf")
+    train_log = []
+
+    try:
+        import wandb
+        wandb.init(mode="offline", config=config)
+    except ImportError:
+        wandb = None
+
+    for epoch in range(epochs):
+        # TODO: Training loop
+        # epoch_loss = train_one_epoch(model, dataloader, optimizer, device)
+        epoch_loss = 0.0  # placeholder
+
+        train_log.append({"epoch": epoch, "loss": epoch_loss})
+
+        if epoch_loss < best_loss:
+            best_loss = epoch_loss
+            torch.save({}, checkpoint_dir / "best_model.pth")
+
+        if (epoch + 1) % 10 == 0:
+            print(f"Epoch {epoch+1}/{epochs}, Loss: {epoch_loss:.4f}")
+
+        if wandb:
+            wandb.log({"epoch": epoch, "loss": epoch_loss})
+
+    # Save training log
+    log_path = Path(args.config).parent / "train_log.json"
+    with open(log_path, "w") as f:
+        json.dump(train_log, f, indent=2)
+
+    if wandb:
+        wandb.finish()
+
+    print(f"Training complete. Best loss: {best_loss:.4f}")
+    print(f"Checkpoint: {checkpoint_dir / 'best_model.pth'}")
+
+if __name__ == "__main__":
+    main()
+'''
