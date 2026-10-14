@@ -20,7 +20,7 @@ everything it could not confirm from those pages is listed as an open row in
 
 ## Also here: gilbreth-cli (live-verified sibling)
 
-A second implementation, `gilbreth_cli` (`gilbreth-connect`, `gilbreth-run`, `gilbreth-exp`, `gilbreth-shell`, `gilbreth-info` ...),
+A second implementation, `gilbreth_cli` (`gilbreth-connect` / `gilbreth-status` / `gilbreth-disconnect`, `gilbreth-sync`, `gilbreth-env`, `gilbreth-exp`, `gilbreth-run`, `gilbreth-shell`, `gilbreth-info`),
 was written independently and verified on the real cluster on 2026-10-14 (account `shey`: A30 and A100-40GB jobs, scratch conda
 envs, job-array sweeps). Its guide, including what the live cluster actually looks like, is in
 [docs/GILBRETH.md](docs/GILBRETH.md) / [docs/GILBRETH.ko.md](docs/GILBRETH.ko.md). The two tools do not share code; see

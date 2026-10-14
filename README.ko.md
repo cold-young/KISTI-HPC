@@ -20,7 +20,7 @@
 
 ## 같이 들어 있는 것: gilbreth-cli (실서버 검증판)
 
-별도로 작성된 두 번째 구현 `gilbreth_cli` (`gilbreth-connect`, `gilbreth-run`, `gilbreth-exp`, `gilbreth-shell`, `gilbreth-info` …) 가
+별도로 작성된 두 번째 구현 `gilbreth_cli` (`gilbreth-connect` / `gilbreth-status` / `gilbreth-disconnect`, `gilbreth-sync`, `gilbreth-env`, `gilbreth-exp`, `gilbreth-run`, `gilbreth-shell`, `gilbreth-info`) 가
 2026-10-14 에 실제 클러스터에서 검증되었습니다 (account `shey`: A30 / A100-40GB 작업, scratch conda env, job-array 스윕).
 실측된 클러스터 정보를 포함한 가이드는 [docs/GILBRETH.ko.md](docs/GILBRETH.ko.md) / [docs/GILBRETH.md](docs/GILBRETH.md) 에 있습니다.
 두 도구는 코드를 공유하지 않습니다. 관계는 [§9](#9-프로젝트-연혁) 참고.

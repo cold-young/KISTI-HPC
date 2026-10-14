@@ -178,10 +178,17 @@ def test_fact_delimiter_exemption_cannot_hide_a_fact(name: str) -> None:
 
 
 def test_pyproject_declares_exactly_twelve_rcac_scripts() -> None:
-    """AC-1.2 restated where AC-8.3 reads it, so the count cannot drift."""
+    """AC-1.2 restated where AC-8.3 reads it, so the count cannot drift.
+
+    Since the merge of the live-verified sibling ``gilbreth_cli`` the table also
+    carries ``gilbreth-*`` entries; those are documented by AC-8.3 like every
+    other script but are not part of the rcac-cli twelve.
+    """
     scripts = _console_scripts()
-    assert len(scripts) == 12, sorted(scripts)
-    assert all(entry.startswith("rcac-") for entry in scripts), sorted(scripts)
+    rcac = sorted(entry for entry in scripts if entry.startswith("rcac-"))
+    others = sorted(entry for entry in scripts if not entry.startswith("rcac-"))
+    assert len(rcac) == 12, rcac
+    assert all(entry.startswith("gilbreth-") for entry in others), others
 
 
 @pytest.mark.parametrize("name", READMES)

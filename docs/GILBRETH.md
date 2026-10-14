@@ -29,7 +29,7 @@
 
 ## 1. Gilbreth at a glance
 
-What differs from KISTI Neuron.
+What differs from the previous cluster this tool family started on.
 
 | Item | Gilbreth | Notes |
 |------|----------|-------|
@@ -97,7 +97,7 @@ gilbreth-run -p a100-40gb -g 4 -C nvlink --mem 240G -t 08:00:00 --torchrun train
 ### 2.1 Install
 
 ```bash
-cd KISTI-HPC
+cd <this-repo>
 pip install -e .
 gilbreth-exp --help
 ```

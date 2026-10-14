@@ -29,7 +29,7 @@
 
 ## 1. Gilbreth 한눈에 보기
 
-Neuron(KISTI)과 다른 점만 먼저 보세요.
+이전에 쓰던 클러스터와 다른 점만 먼저 보세요.
 
 | 항목 | Gilbreth | 비고 |
 |------|----------|------|
@@ -97,7 +97,7 @@ gilbreth-run -p a100-40gb -g 4 -C nvlink --mem 240G -t 08:00:00 --torchrun train
 ### 2.1 설치
 
 ```bash
-cd KISTI-HPC
+cd <this-repo>
 pip install -e .
 gilbreth-exp --help
 ```
