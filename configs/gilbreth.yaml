@@ -1,0 +1,86 @@
+# Purdue RCAC Gilbreth 접속 설정 (gilbreth-cli)
+# Docs: https://docs.rcac.purdue.edu/userguides/gilbreth/
+#
+# 값 우선순위: CLI 옵션 > experiment.yaml > 환경변수 (GILBRETH_USER / GILBRETH_ACCOUNT) > 이 파일
+
+ssh:
+  login_host: gilbreth.rcac.purdue.edu
+  user: ""                     # Purdue career account (또는 GILBRETH_USER 환경변수)
+  port: 22
+  control_persist: "12h"       # MFA(Duo) 승인 1회로 유지되는 시간
+  control_path: "~/.ssh/sockets/%r@%h-%p"
+  server_alive_interval: 60
+  server_alive_count_max: 10
+
+# 원격 경로 ({user} 는 자동 치환)
+paths:
+  home: "/home/{user}"                      # 25 GB quota, 스냅샷 백업됨
+  scratch: "/scratch/gilbreth/{user}"       # 100 TB, 60일 미접근 파일 purge, 백업 없음
+  projects: "/scratch/gilbreth/{user}/projects"
+  data: "/scratch/gilbreth/{user}/data"
+  logs: "/scratch/gilbreth/{user}/logs"
+  envs: "/scratch/gilbreth/{user}/envs"     # conda env 위치 (home quota 절약)
+  depot: ""                                 # 그룹 Data Depot (예: /depot/mygroup) - 있으면 컨테이너에 bind
+
+# SLURM 기본값 (Gilbreth 는 -A, -p, -q, --time, --gpus-per-node 가 모두 필요)
+slurm:
+  account: ""                  # 'gilbreth-info accounts' (slist) 로 확인, 또는 GILBRETH_ACCOUNT
+  partition: a30               # a10 | a30 | a100-40gb | a100-80gb | h100 | training  ('gilbreth-info accounts' 로 내 account 가 접근 가능한 파티션 확인)
+  qos: normal                  # normal (과금, 최대 14일) | standby (무료, 4h) | training (training 파티션 전용, 24h)
+  nodes: 1
+  gpus: 1                      # --gpus-per-node
+  cpus_per_gpu: 8              # a30 노드는 16~24 코어/3 GPU, a100-40gb 는 48~128 코어
+  mem: "32G"
+  time: "04:00:00"             # 미지정 시 Gilbreth 기본값은 30분
+  constraint: ""               # 예: nvlink (a100-40gb NVLink 노드)
+  mail_user: ""                # 비우면 메일 알림 없음
+  mail_type: "END,FAIL"
+
+# 실행 환경 기본값
+environment:
+  type: conda                  # conda | conda-env-mod | apptainer | venv | none
+  name: ""                     # conda env 이름 (paths.envs/{name}) 또는 절대경로
+  base_module: rcac            # module purge 후 다시 로드할 기본 스택 (gcc, openmpi, cuda/12.6.0, external). 비우면 purge 만 함
+  conda_module: conda          # 'conda' (Miniforge 25.x, conda-forge 채널) 또는 'anaconda' (2025.06-py313)
+  modules:                     # 작업 스크립트에서 module load 할 목록 (2026-10 확인: cuda 12.1.1 / 12.6.0 / 13.1.0, cudnn/9.2.0.82-12)
+    - cuda/12.6.0              # 로그인 기본값과 동일. pip 로 설치한 PyTorch 는 자체 CUDA 런타임을 쓰므로 생략해도 됨
+  launcher: python             # python | torchrun  (GPU 2개 이상 DDP 학습은 torchrun)
+  env_vars:                    # 모든 작업에 export 되는 환경변수 (캐시는 전부 scratch 로: home 은 25 GB)
+    HF_HOME: "/scratch/gilbreth/{user}/.cache/huggingface"
+    XDG_CACHE_HOME: "/scratch/gilbreth/{user}/.cache"
+    PIP_CACHE_DIR: "/scratch/gilbreth/{user}/.cache/pip"
+    CONDA_PKGS_DIRS: "/scratch/gilbreth/{user}/.conda/pkgs"
+    TORCH_HOME: "/scratch/gilbreth/{user}/.cache/torch"
+
+# rsync 동기화 설정
+sync:
+  exclude:
+    - ".git/"
+    - "__pycache__/"
+    - "*.pyc"
+    - ".DS_Store"
+    - "wandb/"
+    - "*.sif"
+    - "*.pt"
+    - "*.pth"
+    - "*.ckpt"
+    - "outputs/"
+    - "logs/"
+    - ".vscode/"
+    - ".idea/"
+    - "*.egg-info/"
+    - ".venv/"
+  pull_include:
+    - "experiments/**"
+    - "results/**"
+    - "*.json"
+    - "*.csv"
+
+# 파티션 참고표 (gilbreth-info partitions) - 2026-10-14 sfeatures 기준
+partitions:
+  a10:       {gpu: "A10 24GB",   gpus_per_node: "3 (32 cores, 512 GB)",                         qos: "normal, standby"}
+  a30:       {gpu: "A30 24GB",   gpus_per_node: "3 (16-24 cores, 190 GB)",                      qos: "normal, standby"}
+  a100-40gb: {gpu: "A100 40GB",  gpus_per_node: "2 (128 cores, 510 GB) | 4 NVLink (48 cores, 1 TB, -C nvlink)", qos: "normal, standby"}
+  a100-80gb: {gpu: "A100 80GB",  gpus_per_node: "2 (32-64 cores, 512 GB) | 4 (128 cores, 1 TB)", qos: "normal, standby"}
+  h100:      {gpu: "H100",       gpus_per_node: "2 (64 cores, 503 GB)",                         qos: "normal, standby"}
+  training:  {gpu: "A100 80GB",  gpus_per_node: "4 (128 cores, 1 TB)",                          qos: "training (24h, 무료, 신청 필요)"}

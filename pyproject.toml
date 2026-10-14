@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "neuron-cli"
 version = "0.1.0"
-description = "KISTI Neuron HPC workflow automation CLI"
+description = "Workflow CLIs for KISTI Neuron and Purdue RCAC Gilbreth HPC clusters"
 requires-python = ">=3.9"
 dependencies = [
     "click>=8.0",
@@ -34,6 +34,15 @@ neuron-partition = "neuron_cli.partition_selector:select_partition"
 neuron-keepalive = "neuron_cli.keepalive:cli"
 neuron-notify = "neuron_cli.notify:cli"
 neuron-sim = "neuron_cli.simulator:cli"
+gilbreth-connect = "gilbreth_cli.connect:connect"
+gilbreth-status = "gilbreth_cli.connect:status"
+gilbreth-disconnect = "gilbreth_cli.connect:disconnect"
+gilbreth-sync = "gilbreth_cli.sync:cli"
+gilbreth-env = "gilbreth_cli.env:cli"
+gilbreth-exp = "gilbreth_cli.experiment:cli"
+gilbreth-run = "gilbreth_cli.run:run"
+gilbreth-shell = "gilbreth_cli.run:shell"
+gilbreth-info = "gilbreth_cli.info:cli"
 
 [tool.setuptools.packages.find]
-include = ["neuron_cli*"]
+include = ["neuron_cli*", "gilbreth_cli*"]

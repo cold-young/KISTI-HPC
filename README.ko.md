@@ -9,6 +9,43 @@
 
 </div>
 
+## 이 레포에 같이 있는 것: gilbreth-cli (Purdue RCAC Gilbreth)
+
+Purdue **Gilbreth** GPU 클러스터(`gilbreth.rcac.purdue.edu`)용으로 같은 워크플로우를 제공합니다. 2026-10-14 실서버에서 검증했습니다.
+전체 가이드: [docs/GILBRETH.ko.md](docs/GILBRETH.ko.md) · [English](docs/GILBRETH.md)
+
+```bash
+pip install -e .
+export GILBRETH_USER=<purdue_id> GILBRETH_ACCOUNT=<account>   # account 는 gilbreth-info accounts (slist) 로 확인
+gilbreth-connect --setup-config && gilbreth-connect            # Purdue 비밀번호 + Microsoft Authenticator 푸시, 12시간에 한 번
+gilbreth-info doctor                                           # 세션, scratch, 모듈, apptainer 점검
+
+cd my_project
+gilbreth-env setup --python 3.11 --name myenv -r requirements.txt   # scratch 에 conda env 생성 (홈은 25 GB 뿐)
+gilbreth-run -p a30 -g 1 --mem 32G -t 02:00:00 --env myenv python train.py   # 명령 한 줄 -> sbatch 작업 하나
+gilbreth-exp init && gilbreth-exp launch experiment.yaml       # 스윕(job array) 과 파이프라인
+gilbreth-exp status | logs <JOB_ID> | watch <JOB_ID> --pull .  # 모니터링, 결과 자동 다운로드
+gilbreth-shell -g 1 -t 01:00:00                                # 대화형 GPU 쉘 (sinteractive)
+```
+
+| 명령 | 용도 |
+|------|------|
+| `gilbreth-connect` / `-status` / `-disconnect` | SSH ControlMaster 세션 (`--setup-key` 로 SSH 키 등록하면 이후 MFA 불필요) |
+| `gilbreth-sync push / pull / watch / push-data` | `/scratch/gilbreth/<id>/projects/<name>` 로 rsync |
+| `gilbreth-env setup / list / activate / export / remove / modules` | scratch 의 conda env, 모듈 검색 |
+| `gilbreth-run` | 명령 하나를 작업으로 제출 (`--torchrun`, `--container`, `-q standby`) |
+| `gilbreth-exp init / launch / status / history / logs / watch / cancel / attach` | experiment.yaml 스윕과 afterok 파이프라인 |
+| `gilbreth-shell` | `sinteractive` GPU 쉘, `--login` 은 로그인 노드 |
+| `gilbreth-info accounts / partitions / nodes / quota / purge-check / doctor` | `slist`, `sfeatures`, `myquota`, 60일 purge 점검, 설정 doctor |
+
+Neuron 과 다른 점 (account `shey` 로 실측):
+
+- **필수 sbatch 옵션:** `-A <account> -p <partition> -q normal|standby|training --time --gpus-per-node=N --mem`. GPU 종류 = 파티션 (`a10`, `a30`, `a100-40gb`, `a100-80gb`, `h100`, `training`). 내 account 가 쓸 수 있는 파티션은 `slist` 로 확인.
+- **저장소:** 홈 25 GB (백업됨), scratch `/scratch/gilbreth/<id>` 200 TB (60일 미접근 시 삭제, 백업 없음).
+- **로그인:** Purdue 비밀번호 + Microsoft Authenticator 푸시 (Duo 는 2026-05 종료). SSH 키 허용.
+- **소프트웨어:** `module load conda` (Miniforge, conda-forge), 로그인 시 `cuda/12.6.0`, `apptainer`, NGC PyTorch 컨테이너 (`module load ngc/default pytorch/25.01-py3`). 컴퓨트 노드에서 인터넷이 되므로 작업 안에서 pip, wandb online, HF 다운로드 가능.
+- **CLI 가 대신 처리하는 함정:** `conda` 모듈이 캐시를 홈으로 고정함 (scratch 로 다시 export), `module purge` 하면 `module load rcac` 전까지 conda 가 안 보임. 기본 walltime 30분이라 `time` 은 항상 지정. `standby` 는 무료지만 대기열이 김.
+
 ---
 
 ## 목차

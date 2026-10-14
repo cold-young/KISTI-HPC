@@ -1,0 +1,36 @@
+# Purdue Gilbreth training sweep
+# Usage: gilbreth-exp launch examples/gilbreth_experiment.yaml --dry-run
+project: my_model
+
+slurm:
+  # account: mygroup          # or GILBRETH_ACCOUNT
+  partition: a100-80gb
+  qos: normal
+  nodes: 1
+  gpus: 1
+  cpus_per_gpu: 8
+  mem: 64G
+  time: "08:00:00"
+
+environment:
+  type: conda
+  name: train_env             # created by: gilbreth-env setup --from environment.yml
+  modules: [cuda]
+  launcher: python
+
+script: train.py
+args: "--config {config_path} --lr {learning_rate} --dropout {dropout}"
+
+base_params:
+  dataset: data/my_dataset        # relative to the project dir on scratch
+  epochs: 50
+  batch_size: 128
+  seed: 42
+
+sweep:
+  method: grid
+  mode: array                 # one sbatch --array=0-5
+  parallel: 3                 # at most 3 array tasks at once
+  parameters:
+    learning_rate: [1.0e-4, 3.0e-4, 1.0e-3]   # write floats as 1.0e-4 so PyYAML keeps them numeric
+    dropout: [0.1, 0.3]

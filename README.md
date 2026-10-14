@@ -9,6 +9,43 @@
 
 </div>
 
+## Also in this repo: gilbreth-cli (Purdue RCAC Gilbreth)
+
+The same workflow for Purdue's **Gilbreth** GPU cluster (`gilbreth.rcac.purdue.edu`), verified on the live cluster on 2026-10-14.
+Full guide: [docs/GILBRETH.md](docs/GILBRETH.md) · [한국어](docs/GILBRETH.ko.md)
+
+```bash
+pip install -e .
+export GILBRETH_USER=<purdue_id> GILBRETH_ACCOUNT=<account>   # account: gilbreth-info accounts (slist)
+gilbreth-connect --setup-config && gilbreth-connect            # Purdue password + Microsoft Authenticator push, once per 12 h
+gilbreth-info doctor                                           # checks session, scratch, modules, apptainer
+
+cd my_project
+gilbreth-env setup --python 3.11 --name myenv -r requirements.txt   # conda env on scratch (home is only 25 GB)
+gilbreth-run -p a30 -g 1 --mem 32G -t 02:00:00 --env myenv python train.py   # one command -> one sbatch job
+gilbreth-exp init && gilbreth-exp launch experiment.yaml       # sweeps (job array) and pipelines
+gilbreth-exp status | logs <JOB_ID> | watch <JOB_ID> --pull .  # monitor, auto-pull results
+gilbreth-shell -g 1 -t 01:00:00                                # interactive GPU shell (sinteractive)
+```
+
+| Command | Purpose |
+|---------|---------|
+| `gilbreth-connect` / `-status` / `-disconnect` | SSH ControlMaster session (`--setup-key` installs an SSH key so MFA is no longer needed) |
+| `gilbreth-sync push / pull / watch / push-data` | rsync to `/scratch/gilbreth/<id>/projects/<name>` |
+| `gilbreth-env setup / list / activate / export / remove / modules` | conda envs under scratch, module search |
+| `gilbreth-run` | submit a single command as a job (`--torchrun`, `--container`, `-q standby`) |
+| `gilbreth-exp init / launch / status / history / logs / watch / cancel / attach` | experiment.yaml sweeps and afterok pipelines |
+| `gilbreth-shell` | `sinteractive` GPU shell, or `--login` for the front-end |
+| `gilbreth-info accounts / partitions / nodes / quota / purge-check / doctor` | `slist`, `sfeatures`, `myquota`, 60-day purge check, setup doctor |
+
+What differs from Neuron (measured with account `shey`):
+
+- **Required sbatch flags:** `-A <account> -p <partition> -q normal|standby|training --time --gpus-per-node=N --mem`. The GPU type is the partition (`a10`, `a30`, `a100-40gb`, `a100-80gb`, `h100`, `training`); `slist` shows which ones your account can use.
+- **Storage:** home 25 GB (backed up), scratch `/scratch/gilbreth/<id>` 200 TB (purged after 60 days of inactivity, no backup).
+- **Login:** Purdue password + Microsoft Authenticator push (Duo retired 2026-05). SSH keys are allowed.
+- **Software:** `module load conda` (Miniforge, conda-forge), `cuda/12.6.0` at login, `apptainer`, NGC PyTorch containers (`module load ngc/default pytorch/25.01-py3`). Compute nodes have internet, so pip, wandb online and HF downloads work inside jobs.
+- **Gotchas the CLI handles for you:** the `conda` module pins its cache to home (re-exported to scratch), and `module purge` hides conda until `module load rcac` runs again. Default walltime is 30 min, so always set `time`. `standby` is free but the queue is long.
+
 ---
 
 ## Contents
